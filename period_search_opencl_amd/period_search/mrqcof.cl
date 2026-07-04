@@ -112,99 +112,16 @@ void mrqcof_curve1(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
 	__global double* cg,
-	__local double* tmave,
+	__local double* wAll,
+	__local double* geoB,
+	__local double* red,
 	int Inrel,
-	int Lpoints,
-	int num)
+	int Lpoints)
 {
-	//__local double tmave[BLOCK_DIM];  // __shared__
-	__private int Lpoints1 = Lpoints + 1;
-	__private int k, lnp, jp;
-	__private double lave;
-
-	lnp = (*CUDA_LCC).np;
-	lave = (*CUDA_LCC).ave;
-
-	int3 blockIdx, threadIdx;
-	threadIdx.x = get_local_id(0);
-	blockIdx.x = get_group_id(0);
-
-	//precalc thread boundaries
-	int brtmph, brtmpl;
-	brtmph = Lpoints / BLOCK_DIM;
-	if (Lpoints % BLOCK_DIM) brtmph++;
-	brtmpl = threadIdx.x * brtmph;
-	brtmph = brtmpl + brtmph;
-	if (brtmph > Lpoints) brtmph = Lpoints;
-	brtmpl++;
-
-	for (jp = brtmpl; jp <= brtmph; jp++)
-	{
-			/*  ---  BRIGHT  ---  */
-		bright(CUDA_LCC, CUDA_CC, cg, jp, Lpoints1, Inrel);
-	}
-
-	barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE); //__syncthreads();
-
-	if (Inrel == 1)
-	{
-		int tmph, tmpl;
-		tmph = (*CUDA_CC).ma / BLOCK_DIM;
-		if ((*CUDA_CC).ma % BLOCK_DIM) tmph++;
-		tmpl = threadIdx.x * tmph;
-		tmph = tmpl + tmph;
-		if (tmph > (*CUDA_CC).ma) tmph = (*CUDA_CC).ma;
-		tmpl++;
-		if (tmpl == 1) tmpl++;
-
-		int ixx;
-		for (int l = tmpl; l <= tmph; l++)
-		{
-			//jp==1
-			ixx = l;
-			(*CUDA_LCC).dave[l] = (*CUDA_LCC).dytemp[ixx];
-
-			//jp>=2
-			ixx += DYT_STRIDE;
-			for (int jp = 2; jp <= Lpoints; jp++, ixx += DYT_STRIDE)
-			{
-				//(*CUDA_LCC).dave[l] = (*CUDA_LCC).dave[l] + (*CUDA_LCC).dytemp[ixx];
-				(*CUDA_LCC).dave[l] = (*CUDA_LCC).dave[l] + (*CUDA_LCC).dytemp[ixx];
-
-				//if (threadIdx.x == 1)
-				//	printf("[Device | mrqcof_curv1] [%3d] dytemp[%3d]: %10.7f, dave[%3d]: %10.7f\n", blockIdx.x, ixx, (*CUDA_LCC).dytemp[ixx], l, (*CUDA_LCC).dave[l]);
-			}
-		}
-
-		tmave[threadIdx.x] = 0;
-		for (int jp = brtmpl; jp <= brtmph; jp++)
-		{
-			tmave[threadIdx.x] += (*CUDA_LCC).ytemp[jp];
-		}
-
-		barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE); //__syncthreads();
-
-		//parallel reduction
-		k = BLOCK_DIM >> 1;
-		while (k > 1)
-		{
-			if (threadIdx.x < k) tmave[threadIdx.x] += tmave[threadIdx.x + k];
-			k = k >> 1;
-			barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE); //__syncthreads();
-		}
-
-		if (threadIdx.x == 0)
-		{
-			lave = tmave[0] + tmave[1];
-		}
-		//parallel reduction end
-	}
-
-	if (threadIdx.x == 0)
-	{
-		(*CUDA_LCC).np = lnp + Lpoints;
-		(*CUDA_LCC).ave = lave;
-	}
+	/* work-group-cooperative rewrite: geometry, brightness, derivatives and
+	   the dave/ave/np bookkeeping all happen in bright_curve1_wg (bright.cl);
+	   alpha/beta are accumulated later in mrqcof_curve2 */
+	bright_curve1_wg(CUDA_LCC, CUDA_CC, cg, Inrel, Lpoints, wAll, geoB, red);
 }
 
 void mrqcof_curve1_last(

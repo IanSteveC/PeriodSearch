@@ -354,14 +354,18 @@ __kernel void ClCalculateIter1Mrqcof1Curve1(
     if (!(*CUDA_LCC).isAlamda) return;
 
     __local int num;  // __shared__
-    __local double tmave[BLOCK_DIM];
+    /* local staging for the cooperative curve1 (see bright.cl):
+       facet weights, geometry batch, reduction scratch - ~17.7 KB total */
+    __local double wAll[2 * (MAX_N_FAC + 1)];
+    __local double geoB[GEO_BATCH * GEO_SIZE];
+    __local double red[6 * BLOCK_DIM];
 
     if (threadIdx.x == 0)
     {
         num = 0;
     }
 
-    mrqcof_curve1(CUDA_LCC, CUDA_CC, (*CUDA_LCC).cg, tmave, inrel, lpoints, num);
+    mrqcof_curve1(CUDA_LCC, CUDA_CC, (*CUDA_LCC).cg, wAll, geoB, red, inrel, lpoints);
 
     //if (blockIdx.x == 0 && threadIdx.x == 0)
     //	printf("[Mrqcof1Curve1] [%d][%3d] alpha[56]: %10.7f\n", blockIdx.x, threadIdx.x, (*CUDA_LCC).alpha[56]);
@@ -613,7 +617,11 @@ __kernel void ClCalculateIter1Mrqcof2Curve1(
     if (!(*CUDA_LCC).isNiter) return;
 
     __local int num;  // __shared__
-    __local double tmave[BLOCK_DIM];
+    /* local staging for the cooperative curve1 (see bright.cl):
+       facet weights, geometry batch, reduction scratch - ~17.7 KB total */
+    __local double wAll[2 * (MAX_N_FAC + 1)];
+    __local double geoB[GEO_BATCH * GEO_SIZE];
+    __local double red[6 * BLOCK_DIM];
 
     if (threadIdx.x == 0)
     {
@@ -624,7 +632,7 @@ __kernel void ClCalculateIter1Mrqcof2Curve1(
     //	printf("Mrqcof2Curve1\n");
 
     //mrqcof_curve1(CUDA_LCC, (*CUDA_LCC).atry, (*CUDA_LCC).covar, (*CUDA_LCC).da, inrel, lpoints);
-    mrqcof_curve1(CUDA_LCC, CUDA_CC, (*CUDA_LCC).atry, tmave, inrel, lpoints, num);
+    mrqcof_curve1(CUDA_LCC, CUDA_CC, (*CUDA_LCC).atry, wAll, geoB, red, inrel, lpoints);
     barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE);
 }
 

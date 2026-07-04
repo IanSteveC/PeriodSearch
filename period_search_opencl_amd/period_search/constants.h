@@ -24,6 +24,11 @@
    mrqcof_curve2 */
 #define CURVE2_K             8
 
+/* work-group-cooperative curve1: points whose geometry is staged per batch,
+   and doubles of local memory per staged point */
+#define GEO_BATCH            16
+#define GEO_SIZE             28
+
 #define PI                 M_PI             /* 3.14159265358979323846 */
 #define AU            149597870.691         /* Astronomical Unit [km] */
 #define C_SPEED       299792458             /* speed of light [m/s]*/

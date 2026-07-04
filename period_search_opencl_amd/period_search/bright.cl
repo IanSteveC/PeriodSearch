@@ -403,3 +403,418 @@ void bright(
 
 	//return(0);
 }
+
+
+/* ====================================================================== */
+/* 2026 work-group-cooperative curve1.                                    */
+/*                                                                        */
+/* The old path gave each work-item one data point and had it walk all    */
+/* Numfac facets alone, keeping per-point visible-facet lists in private  */
+/* arrays (short incl[MAX_N_FAC], double dbr[MAX_N_FAC]) - ~10 KB of      */
+/* scratch per work-item that can never live in registers, measured with  */
+/* CL_KERNEL_PRIVATE_MEM_SIZE. The whole work-group now cooperates on one */
+/* point at a time:                                                       */
+/*                                                                        */
+/*   - the per-point geometry (the former matrix_neo pass, and its        */
+/*     de, de0, e and jp per-point global buffers) is computed for       */
+/*     GEO_BATCH points at a time, one work-item per point, into local    */
+/*     memory;                                                            */
+/*   - the facet pass strides the facets across the work-group and        */
+/*     stores each facet weight (zero when invisible) to a local array -  */
+/*     deterministic, no compaction races;                                */
+/*   - the six per-point sums reduce through a fixed-order local-memory   */
+/*     tree;                                                              */
+/*   - the derivative pass runs one work-item per parameter column:       */
+/*     Dsph reads coalesce across the group, the transposed dytemp row    */
+/*     write coalesces, and the dave column sums fall out for free.       */
+/*                                                                        */
+/* Only barrier(CLK_LOCAL_MEM_FENCE) is used - no sub-group or wave-size  */
+/* assumptions - and every reduction order is fixed, so results are       */
+/* deterministic and identical on wave32 (RDNA) and wave64 (GCN).         */
+/* ====================================================================== */
+
+/* per-point geometry layout in local memory (GEO_SIZE doubles):
+   0..8   de[1..3][1..3]  ((r-1)*3 + c-1)
+   9..17  de0[1..3][1..3]
+   18..20 e_1..e_3        21..23 e0_1..e0_3
+   24 Scale   25 dphp1   26 dphp2   27 dphp3 */
+
+void bright_point_geometry(
+	__global struct mfreq_context* CUDA_LCC,
+	__global struct freq_context* CUDA_CC,
+	__global double* cg,
+	int lnp,
+	__local double* g)
+{
+	__private double f, cf, sf, pom, pom0, alpha;
+	__private double ee_1, ee_2, ee_3, ee0_1, ee0_2, ee0_3, t, tmat;
+
+	ee_1 = (*CUDA_CC).ee[lnp][0];
+	ee0_1 = (*CUDA_CC).ee0[lnp][0];
+	ee_2 = (*CUDA_CC).ee[lnp][1];
+	ee0_2 = (*CUDA_CC).ee0[lnp][1];
+	ee_3 = (*CUDA_CC).ee[lnp][2];
+	ee0_3 = (*CUDA_CC).ee0[lnp][2];
+	t = (*CUDA_CC).tim[lnp];
+
+	/* ee and ee0 are unit vectors, so the dot product is mathematically in
+	   [-1, 1]; near opposition it lands within ~1e-7 of 1.0 and an
+	   out-of-range rounding would turn this point - and every trial
+	   frequency using it - into NaN (same guard as the CUDA app) */
+	alpha = acos(fmin(1.0, fmax(-1.0, ee_1 * ee0_1 + ee_2 * ee0_2 + ee_3 * ee0_3)));
+
+	/* Exp-lin model (const.term=1.) */
+	f = exp(-alpha / cg[(*CUDA_CC).Ncoef0 + 2]);
+	g[24] = 1 + cg[(*CUDA_CC).Ncoef0 + 1] * f + (cg[(*CUDA_CC).Ncoef0 + 3] * alpha);
+	g[25] = f;
+	g[26] = cg[(*CUDA_CC).Ncoef0 + 1] * f * alpha / (cg[(*CUDA_CC).Ncoef0 + 2] * cg[(*CUDA_CC).Ncoef0 + 2]);
+	g[27] = alpha;
+
+	//  matrix start
+	f = cg[(*CUDA_CC).Ncoef0] * t + (*CUDA_CC).Phi_0;
+	f = fmod(f, 2 * PI);
+	sf = sincos(f, &cf);
+
+	/* rotation matrix, Z axis, angle f; same expressions as the old
+	   matrix_neo, only the outputs go to local memory */
+	tmat = cf * (*CUDA_LCC).Blmat[1][1] + sf * (*CUDA_LCC).Blmat[2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = cf * (*CUDA_LCC).Blmat[1][2] + sf * (*CUDA_LCC).Blmat[2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = cf * (*CUDA_LCC).Blmat[1][3] + sf * (*CUDA_LCC).Blmat[2][3];
+	g[18] = pom + tmat * ee_3;
+	g[21] = pom0 + tmat * ee0_3;
+
+	tmat = (-sf) * (*CUDA_LCC).Blmat[1][1] + cf * (*CUDA_LCC).Blmat[2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = (-sf) * (*CUDA_LCC).Blmat[1][2] + cf * (*CUDA_LCC).Blmat[2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = (-sf) * (*CUDA_LCC).Blmat[1][3] + cf * (*CUDA_LCC).Blmat[2][3];
+	g[19] = pom + tmat * ee_3;
+	g[22] = pom0 + tmat * ee0_3;
+
+	tmat = (*CUDA_LCC).Blmat[3][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = (*CUDA_LCC).Blmat[3][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = (*CUDA_LCC).Blmat[3][3];
+	g[20] = pom + tmat * ee_3;
+	g[23] = pom0 + tmat * ee0_3;
+
+	/* de[.][1], de0[.][1]: w.r.t. beta */
+	tmat = cf * (*CUDA_LCC).Dblm[1][1][1] + sf * (*CUDA_LCC).Dblm[1][2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = cf * (*CUDA_LCC).Dblm[1][1][2] + sf * (*CUDA_LCC).Dblm[1][2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = cf * (*CUDA_LCC).Dblm[1][1][3] + sf * (*CUDA_LCC).Dblm[1][2][3];
+	g[0] = pom + tmat * ee_3;
+	g[9] = pom0 + tmat * ee0_3;
+
+	/* de[.][2], de0[.][2]: w.r.t. lambda */
+	tmat = cf * (*CUDA_LCC).Dblm[2][1][1] + sf * (*CUDA_LCC).Dblm[2][2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = cf * (*CUDA_LCC).Dblm[2][1][2] + sf * (*CUDA_LCC).Dblm[2][2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = cf * (*CUDA_LCC).Dblm[2][1][3] + sf * (*CUDA_LCC).Dblm[2][2][3];
+	g[1] = pom + tmat * ee_3;
+	g[10] = pom0 + tmat * ee0_3;
+
+	/* de[.][3], de0[.][3]: w.r.t. the rotation rate (angle = omega*t) */
+	tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][1] + (t * cf) * (*CUDA_LCC).Blmat[2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][2] + (t * cf) * (*CUDA_LCC).Blmat[2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][3] + (t * cf) * (*CUDA_LCC).Blmat[2][3];
+	g[2] = pom + tmat * ee_3;
+	g[11] = pom0 + tmat * ee0_3;
+
+	tmat = -sf * (*CUDA_LCC).Dblm[1][1][1] + cf * (*CUDA_LCC).Dblm[1][2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = -sf * (*CUDA_LCC).Dblm[1][1][2] + cf * (*CUDA_LCC).Dblm[1][2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = -sf * (*CUDA_LCC).Dblm[1][1][3] + cf * (*CUDA_LCC).Dblm[1][2][3];
+	g[3] = pom + tmat * ee_3;
+	g[12] = pom0 + tmat * ee0_3;
+
+	tmat = -sf * (*CUDA_LCC).Dblm[2][1][1] + cf * (*CUDA_LCC).Dblm[2][2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = -sf * (*CUDA_LCC).Dblm[2][1][2] + cf * (*CUDA_LCC).Dblm[2][2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = -sf * (*CUDA_LCC).Dblm[2][1][3] + cf * (*CUDA_LCC).Dblm[2][2][3];
+	g[4] = pom + tmat * ee_3;
+	g[13] = pom0 + tmat * ee0_3;
+
+	tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][1] + (-t * sf) * (*CUDA_LCC).Blmat[2][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][2] + (-t * sf) * (*CUDA_LCC).Blmat[2][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][3] + (-t * sf) * (*CUDA_LCC).Blmat[2][3];
+	g[5] = pom + tmat * ee_3;
+	g[14] = pom0 + tmat * ee0_3;
+
+	tmat = (*CUDA_LCC).Dblm[1][3][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = (*CUDA_LCC).Dblm[1][3][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = (*CUDA_LCC).Dblm[1][3][3];
+	g[6] = pom + tmat * ee_3;
+	g[15] = pom0 + tmat * ee0_3;
+
+	tmat = (*CUDA_LCC).Dblm[2][3][1];
+	pom = tmat * ee_1;
+	pom0 = tmat * ee0_1;
+	tmat = (*CUDA_LCC).Dblm[2][3][2];
+	pom += tmat * ee_2;
+	pom0 += tmat * ee0_2;
+	tmat = (*CUDA_LCC).Dblm[2][3][3];
+	g[7] = pom + tmat * ee_3;
+	g[16] = pom0 + tmat * ee0_3;
+
+	g[8] = 0.0;
+	g[17] = 0.0;
+}
+
+void bright_curve1_wg(
+	__global struct mfreq_context* CUDA_LCC,
+	__global struct freq_context* CUDA_CC,
+	__global double* cg,
+	int Inrel,
+	int Lpoints,
+	__local double* wAll,   /* [2 * (MAX_N_FAC + 1)] facet weights for a point pair */
+	__local double* geoB,   /* [GEO_BATCH * GEO_SIZE] staged geometry */
+	__local double* red)    /* [6 * BLOCK_DIM] reduction scratch */
+{
+	int3 threadIdx;
+	threadIdx.x = get_local_id(0);
+	const int tid = threadIdx.x;
+
+	const int nf = (*CUDA_CC).Numfac;
+	const int nc0 = (*CUDA_CC).Ncoef0;
+	const int nshape = nc0 - 3;
+	const int ma = (*CUDA_CC).ma;
+	const int iStart = Inrel + 1;
+	const int lnp0 = (*CUDA_LCC).np;
+
+	const double cl = exp(cg[ma - 1]); /* Lambert */
+	const double cls = cg[ma];         /* Lommel-Seeliger */
+
+	/* derivative pass: threads 0..63 own point A's columns, threads 64..127
+	   own point B's - both halves of the group stay busy */
+	const int myhalf = tid >> 6;
+	const int c = iStart + (tid & 63);
+	double davec[2];
+	davec[0] = 0; davec[1] = 0;
+	double lave = 0;
+
+	__local double* wA = wAll;
+	__local double* wB = wAll + (MAX_N_FAC + 1);
+
+	int jp0, p, f, k;
+
+	for (jp0 = 1; jp0 <= Lpoints; jp0 += GEO_BATCH)
+	{
+		int nb = Lpoints - jp0 + 1;
+		if (nb > GEO_BATCH) nb = GEO_BATCH;
+
+		if (tid < nb)
+			bright_point_geometry(CUDA_LCC, CUDA_CC, cg, lnp0 + jp0 + tid, &geoB[tid * GEO_SIZE]);
+		barrier(CLK_LOCAL_MEM_FENCE);
+
+		/* two points per sweep: every facet's normal and area are loaded
+		   once and feed both points' sums */
+		for (p = 0; p < nb; p += 2)
+		{
+			const int jpA = jp0 + p;
+			const int haveB = (p + 1 < nb);
+			__local const double* gA = &geoB[p * GEO_SIZE];
+			__local const double* gB = &geoB[(p + (haveB ? 1 : 0)) * GEO_SIZE];
+
+			double brA = 0, t1A = 0, t2A = 0, t3A = 0, t4A = 0, t5A = 0;
+			double brB = 0, t1B = 0, t2B = 0, t3B = 0, t4B = 0, t5B = 0;
+			for (f = 1 + tid; f <= nf; f += BLOCK_DIM)
+			{
+				const double n0 = (*CUDA_CC).Nor[f][0];
+				const double n1 = (*CUDA_CC).Nor[f][1];
+				const double n2 = (*CUDA_CC).Nor[f][2];
+				const double ar = (*CUDA_LCC).Area[f];
+
+				{
+					double lmu = gA[18] * n0 + gA[19] * n1 + gA[20] * n2;
+					double lmu0 = gA[21] * n0 + gA[22] * n1 + gA[23] * n2;
+					double w = 0.0;
+					if ((lmu > TINY) && (lmu0 > TINY))
+					{
+						double dnom = lmu + lmu0;
+						double s = lmu * lmu0 * (cl + cls / dnom);
+						brA += ar * s;
+						w = ar * s;
+						double lmu0_dnom = lmu0 / dnom;
+						double dsmu = cls * (lmu0_dnom * lmu0_dnom) + cl * lmu0;
+						double lmu_dnom = lmu / dnom;
+						double dsmu0 = cls * (lmu_dnom * lmu_dnom) + cl * lmu;
+						double sum1 = n0 * gA[0] + n1 * gA[3] + n2 * gA[6];
+						double sum10 = n0 * gA[9] + n1 * gA[12] + n2 * gA[15];
+						double sum2 = n0 * gA[1] + n1 * gA[4] + n2 * gA[7];
+						double sum20 = n0 * gA[10] + n1 * gA[13] + n2 * gA[16];
+						double sum3 = n0 * gA[2] + n1 * gA[5] + n2 * gA[8];
+						double sum30 = n0 * gA[11] + n1 * gA[14] + n2 * gA[17];
+						t1A += ar * (dsmu * sum1 + dsmu0 * sum10);
+						t2A += ar * (dsmu * sum2 + dsmu0 * sum20);
+						t3A += ar * (dsmu * sum3 + dsmu0 * sum30);
+						t4A += lmu * lmu0 * ar;
+						t5A += ar * lmu * lmu0 / (lmu + lmu0);
+					}
+					wA[f] = w;
+				}
+				if (haveB)
+				{
+					double lmu = gB[18] * n0 + gB[19] * n1 + gB[20] * n2;
+					double lmu0 = gB[21] * n0 + gB[22] * n1 + gB[23] * n2;
+					double w = 0.0;
+					if ((lmu > TINY) && (lmu0 > TINY))
+					{
+						double dnom = lmu + lmu0;
+						double s = lmu * lmu0 * (cl + cls / dnom);
+						brB += ar * s;
+						w = ar * s;
+						double lmu0_dnom = lmu0 / dnom;
+						double dsmu = cls * (lmu0_dnom * lmu0_dnom) + cl * lmu0;
+						double lmu_dnom = lmu / dnom;
+						double dsmu0 = cls * (lmu_dnom * lmu_dnom) + cl * lmu;
+						double sum1 = n0 * gB[0] + n1 * gB[3] + n2 * gB[6];
+						double sum10 = n0 * gB[9] + n1 * gB[12] + n2 * gB[15];
+						double sum2 = n0 * gB[1] + n1 * gB[4] + n2 * gB[7];
+						double sum20 = n0 * gB[10] + n1 * gB[13] + n2 * gB[16];
+						double sum3 = n0 * gB[2] + n1 * gB[5] + n2 * gB[8];
+						double sum30 = n0 * gB[11] + n1 * gB[14] + n2 * gB[17];
+						t1B += ar * (dsmu * sum1 + dsmu0 * sum10);
+						t2B += ar * (dsmu * sum2 + dsmu0 * sum20);
+						t3B += ar * (dsmu * sum3 + dsmu0 * sum30);
+						t4B += lmu * lmu0 * ar;
+						t5B += ar * lmu * lmu0 / (lmu + lmu0);
+					}
+					wB[f] = w;
+				}
+			}
+
+			/* reduce point A's six sums, then point B's (fixed-order tree) */
+			for (int pt = 0; pt < (haveB ? 2 : 1); pt++)
+			{
+				red[0 * BLOCK_DIM + tid] = pt ? brB : brA;
+				red[1 * BLOCK_DIM + tid] = pt ? t1B : t1A;
+				red[2 * BLOCK_DIM + tid] = pt ? t2B : t2A;
+				red[3 * BLOCK_DIM + tid] = pt ? t3B : t3A;
+				red[4 * BLOCK_DIM + tid] = pt ? t4B : t4A;
+				red[5 * BLOCK_DIM + tid] = pt ? t5B : t5A;
+				barrier(CLK_LOCAL_MEM_FENCE);
+				for (k = BLOCK_DIM >> 1; k > 0; k >>= 1)
+				{
+					if (tid < k)
+					{
+						red[0 * BLOCK_DIM + tid] += red[0 * BLOCK_DIM + tid + k];
+						red[1 * BLOCK_DIM + tid] += red[1 * BLOCK_DIM + tid + k];
+						red[2 * BLOCK_DIM + tid] += red[2 * BLOCK_DIM + tid + k];
+						red[3 * BLOCK_DIM + tid] += red[3 * BLOCK_DIM + tid + k];
+						red[4 * BLOCK_DIM + tid] += red[4 * BLOCK_DIM + tid + k];
+						red[5 * BLOCK_DIM + tid] += red[5 * BLOCK_DIM + tid + k];
+					}
+					barrier(CLK_LOCAL_MEM_FENCE);
+				}
+				/* park this point's reduced sums in the unused tail of its
+				   weight array (facets are 1-based and nf + 6 < MAX_N_FAC) so
+				   the next point's tree cannot clobber them */
+				if (tid < 6)
+					(pt ? wB : wA)[nf + 1 + tid] = red[tid * BLOCK_DIM];
+				if (tid == 0)
+				{
+					__local const double* gg = pt ? gB : gA;
+					const double ymod = red[0 * BLOCK_DIM] * gg[24];
+					(*CUDA_LCC).ytemp[jpA + pt] = ymod;
+					lave += ymod;
+				}
+				barrier(CLK_LOCAL_MEM_FENCE);
+			}
+
+			/* derivative rows for both points at once; four independent
+			   accumulators break the serial dependency chain */
+			{
+				const int mypt = (haveB && myhalf) ? 1 : 0;
+				const int jp = jpA + mypt;
+				__local const double* g = mypt ? gB : gA;
+				__local const double* w = mypt ? wB : wA;
+				const int active = (myhalf == 0) || haveB;
+
+				if (active && c <= ma)
+				{
+					double v;
+					if (c <= nshape)
+					{
+						double a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+						int fe = nf - 3;
+						for (f = 1; f <= fe; f += 4)
+						{
+							a0 += w[f] * (*CUDA_CC).Dsph[f][c];
+							a1 += w[f + 1] * (*CUDA_CC).Dsph[f + 1][c];
+							a2 += w[f + 2] * (*CUDA_CC).Dsph[f + 2][c];
+							a3 += w[f + 3] * (*CUDA_CC).Dsph[f + 3][c];
+						}
+						for (; f <= nf; f++)
+							a0 += w[f] * (*CUDA_CC).Dsph[f][c];
+						v = g[24] * ((a0 + a1) + (a2 + a3));
+					}
+					else if (c == nshape + 1) v = g[24] * w[nf + 2];
+					else if (c == nshape + 2) v = g[24] * w[nf + 3];
+					else if (c == nshape + 3) v = g[24] * w[nf + 4];
+					else if (c == nc0 + 1) v = w[nf + 1] * g[25];
+					else if (c == nc0 + 2) v = w[nf + 1] * g[26];
+					else if (c == nc0 + 3) v = w[nf + 1] * g[27];
+					else if (c == ma - 1) v = g[24] * w[nf + 5] * cl;
+					else v = g[24] * w[nf + 6];
+
+					(*CUDA_LCC).dytemp[(jp - 1) * DYT_STRIDE + c] = v;
+					davec[mypt] += v;
+				}
+			}
+			/* wAll/red/geo slots are reused by the next pair */
+			barrier(CLK_LOCAL_MEM_FENCE);
+		}
+	}
+
+	/* dave: column sums per point-parity, combined A-half plus B-half.
+	   Threads 0..63 hold the sums of even-indexed points of each pair,
+	   threads 64..127 the odd ones; combine through local memory. */
+	red[tid] = davec[myhalf];
+	barrier(CLK_LOCAL_MEM_FENCE);
+	if (Inrel == 1 && myhalf == 0 && c <= ma)
+	{
+		(*CUDA_LCC).dave[c] = red[tid] + red[tid + 64];
+	}
+	if (tid == 0)
+	{
+		(*CUDA_LCC).np = lnp0 + Lpoints;
+		if (Inrel == 1)
+			(*CUDA_LCC).ave = lave;
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+}
+
