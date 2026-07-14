@@ -18,60 +18,69 @@
 
 #pragma OPENCL FP_CONTRACT OFF
 
+/* df is float2 for the real build. -DDF_LINT makes it a struct so the OpenCL
+   compiler rejects any raw infix arithmetic on df operands (which float2 would
+   silently do component-wise) - a compile-checked checklist for the port. */
+#ifdef DF_LINT
+typedef struct { float x, y; } df;
+#define DFV(a,b) ((df){a,b})
+#else
 typedef float2 df;
+#define DFV(a,b) ((float2)(a,b))
+#endif
 
 /* ---- constants (two-float splits; see gen script) ---- */
-#define DF_2PI   ((float2)(6.28318548f, -1.748455531e-07f))
-#define DF_PI    ((float2)(3.14159274f, -8.742277657e-08f))
-#define DF_PIO2  ((float2)(1.57079637f, -4.371138829e-08f))
-#define DF_2OPI  ((float2)(0.636619747f, 2.568255297e-08f))
-#define DF_LN2   ((float2)(0.693147182f, -1.904654212e-09f))
-#define DF_LOG2E ((float2)(1.44269502f, 1.925963034e-08f))
-#define DF_HALF  ((float2)(0.5f, 0.0f))
-#define DF_ONE   ((float2)(1.0f, 0.0f))
-#define DF_ZERO  ((float2)(0.0f, 0.0f))
+#define DF_2PI   DFV(6.28318548f, -1.748455531e-07f)
+#define DF_PI    DFV(3.14159274f, -8.742277657e-08f)
+#define DF_PIO2  DFV(1.57079637f, -4.371138829e-08f)
+#define DF_2OPI  DFV(0.636619747f, 2.568255297e-08f)
+#define DF_LN2   DFV(0.693147182f, -1.904654212e-09f)
+#define DF_LOG2E DFV(1.44269502f, 1.925963034e-08f)
+#define DF_HALF  DFV(0.5f, 0.0f)
+#define DF_ONE   DFV(1.0f, 0.0f)
+#define DF_ZERO  DFV(0.0f, 0.0f)
 
-#define DF_S3 ((float2)(-0.166666672f, 4.967053879e-09f))
-#define DF_S5 ((float2)(0.00833333377f, -4.346172033e-10f))
-#define DF_S7 ((float2)(-0.000198412701f, 2.725596875e-12f))
-#define DF_S9 ((float2)(2.75573188e-06f, 3.793571224e-14f))
-#define DF_S11 ((float2)(-2.50521079e-08f, -4.417623045e-16f))
-#define DF_S13 ((float2)(1.60590444e-10f, -5.352526512e-18f))
-#define DF_S15 ((float2)(-7.64716361e-13f, -1.220071047e-20f))
-#define DF_S17 ((float2)(2.81145736e-15f, -1.046208474e-22f))
-#define DF_S19 ((float2)(-8.22063508e-18f, -1.681478097e-25f))
+#define DF_S3 DFV(-0.166666672f, 4.967053879e-09f)
+#define DF_S5 DFV(0.00833333377f, -4.346172033e-10f)
+#define DF_S7 DFV(-0.000198412701f, 2.725596875e-12f)
+#define DF_S9 DFV(2.75573188e-06f, 3.793571224e-14f)
+#define DF_S11 DFV(-2.50521079e-08f, -4.417623045e-16f)
+#define DF_S13 DFV(1.60590444e-10f, -5.352526512e-18f)
+#define DF_S15 DFV(-7.64716361e-13f, -1.220071047e-20f)
+#define DF_S17 DFV(2.81145736e-15f, -1.046208474e-22f)
+#define DF_S19 DFV(-8.22063508e-18f, -1.681478097e-25f)
 
-#define DF_C2 ((float2)(-0.5f, 0.0f))
-#define DF_C4 ((float2)(0.0416666679f, -1.241763470e-09f))
-#define DF_C6 ((float2)(-0.00138888892f, 3.363109444e-11f))
-#define DF_C8 ((float2)(2.48015876e-05f, -3.406996094e-13f))
-#define DF_C10 ((float2)(-2.755732e-07f, 7.575112209e-15f))
-#define DF_C12 ((float2)(2.08767559e-09f, 1.108283981e-16f))
-#define DF_C14 ((float2)(-1.14707454e-11f, -2.372207689e-19f))
-#define DF_C16 ((float2)(4.77947726e-14f, 7.625444044e-22f))
-#define DF_C18 ((float2)(-1.56192068e-16f, -1.540447147e-24f))
+#define DF_C2 DFV(-0.5f, 0.0f)
+#define DF_C4 DFV(0.0416666679f, -1.241763470e-09f)
+#define DF_C6 DFV(-0.00138888892f, 3.363109444e-11f)
+#define DF_C8 DFV(2.48015876e-05f, -3.406996094e-13f)
+#define DF_C10 DFV(-2.755732e-07f, 7.575112209e-15f)
+#define DF_C12 DFV(2.08767559e-09f, 1.108283981e-16f)
+#define DF_C14 DFV(-1.14707454e-11f, -2.372207689e-19f)
+#define DF_C16 DFV(4.77947726e-14f, 7.625444044e-22f)
+#define DF_C18 DFV(-1.56192068e-16f, -1.540447147e-24f)
 
-#define DF_E2 ((float2)(0.5f, 0.0f))
-#define DF_E3 ((float2)(0.166666672f, -4.967053879e-09f))
-#define DF_E4 ((float2)(0.0416666679f, -1.241763470e-09f))
-#define DF_E5 ((float2)(0.00833333377f, -4.346172033e-10f))
-#define DF_E6 ((float2)(0.00138888892f, -3.363109444e-11f))
-#define DF_E7 ((float2)(0.000198412701f, -2.725596875e-12f))
-#define DF_E8 ((float2)(2.48015876e-05f, -3.406996094e-13f))
-#define DF_E9 ((float2)(2.75573188e-06f, 3.793571224e-14f))
-#define DF_E10 ((float2)(2.755732e-07f, -7.575112209e-15f))
-#define DF_E11 ((float2)(2.50521079e-08f, 4.417623045e-16f))
-#define DF_E12 ((float2)(2.08767559e-09f, 1.108283981e-16f))
-#define DF_E13 ((float2)(1.60590444e-10f, -5.352526512e-18f))
+#define DF_E2 DFV(0.5f, 0.0f)
+#define DF_E3 DFV(0.166666672f, -4.967053879e-09f)
+#define DF_E4 DFV(0.0416666679f, -1.241763470e-09f)
+#define DF_E5 DFV(0.00833333377f, -4.346172033e-10f)
+#define DF_E6 DFV(0.00138888892f, -3.363109444e-11f)
+#define DF_E7 DFV(0.000198412701f, -2.725596875e-12f)
+#define DF_E8 DFV(2.48015876e-05f, -3.406996094e-13f)
+#define DF_E9 DFV(2.75573188e-06f, 3.793571224e-14f)
+#define DF_E10 DFV(2.755732e-07f, -7.575112209e-15f)
+#define DF_E11 DFV(2.50521079e-08f, 4.417623045e-16f)
+#define DF_E12 DFV(2.08767559e-09f, 1.108283981e-16f)
+#define DF_E13 DFV(1.60590444e-10f, -5.352526512e-18f)
 
-#define DF_A3 ((float2)(0.166666672f, -4.967053879e-09f))
-#define DF_A5 ((float2)(0.075000003f, -2.980232283e-09f))
-#define DF_A7 ((float2)(0.0446428582f, -1.064368704e-09f))
-#define DF_A9 ((float2)(0.030381944f, 4.139211474e-10f))
+#define DF_A3 DFV(0.166666672f, -4.967053879e-09f)
+#define DF_A5 DFV(0.075000003f, -2.980232283e-09f)
+#define DF_A7 DFV(0.0446428582f, -1.064368704e-09f)
+#define DF_A9 DFV(0.030381944f, 4.139211474e-10f)
 
 /* ---- constructors ---- */
-static inline df df_f(float a) { return (float2)(a, 0.0f); }
-static inline df df_i(int a)   { float h = (float)a; return (float2)(h, (float)(a - (int)h)); }
+static inline df df_f(float a) { return DFV(a, 0.0f); }
+static inline df df_i(int a)   { float h = (float)a; return DFV(h, (float)(a - (int)h)); }
 
 /* ---- error-free transformations ---- */
 static inline float two_sum(float a, float b, float *err) {
@@ -91,32 +100,32 @@ static inline float two_prod(float a, float b, float *err) {
 static inline df df_add(df a, df b) {
     float s1, s2, t1, t2;
     s1 = two_sum(a.x, b.x, &s2);
-    if (!isfinite(s1)) return (float2)(s1, 0.0f);
+    if (!isfinite(s1)) return DFV(s1, 0.0f);
     t1 = two_sum(a.y, b.y, &t2);
     s2 += t1; s1 = quick_two_sum(s1, s2, &s2);
     s2 += t2; s1 = quick_two_sum(s1, s2, &s2);
-    return (float2)(s1, s2);
+    return DFV(s1, s2);
 }
-static inline df df_neg(df a) { return (float2)(-a.x, -a.y); }
+static inline df df_neg(df a) { return DFV(-a.x, -a.y); }
 static inline df df_sub(df a, df b) { return df_add(a, df_neg(b)); }
 static inline df df_mul(df a, df b) {
     float p1, p2;
     p1 = two_prod(a.x, b.x, &p2);
-    if (!isfinite(p1)) return (float2)(p1, 0.0f);
+    if (!isfinite(p1)) return DFV(p1, 0.0f);
     p2 = fma(a.x, b.y, fma(a.y, b.x, p2));
     p1 = quick_two_sum(p1, p2, &p2);
-    return (float2)(p1, p2);
+    return DFV(p1, p2);
 }
 static inline df df_sqr(df a) { return df_mul(a, a); }
 static inline df df_div(df a, df b) {
     float q1 = a.x / b.x;
-    if (!isfinite(q1) || q1 == 0.0f) return (float2)(q1, 0.0f);
+    if (!isfinite(q1) || q1 == 0.0f) return DFV(q1, 0.0f);
     df r = df_sub(a, df_mul(b, df_f(q1)));
     float q2 = (r.x + r.y) / b.x;
     r = df_sub(r, df_mul(b, df_f(q2)));
     float q3 = (r.x + r.y) / b.x;
     float s1, s2; s1 = quick_two_sum(q1, q2, &s2);
-    return df_add((float2)(s1, s2), df_f(q3));
+    return df_add(DFV(s1, s2), df_f(q3));
 }
 
 /* ---- comparisons ---- */
@@ -137,7 +146,7 @@ static inline df df_round(df a) {
     float d = (a.x - r) + a.y;   /* |a.x - r| <= 0.5 -> exact (Sterbenz) */
     if (d > 0.5f) r += 1.0f;
     else if (d < -0.5f) r -= 1.0f;
-    return (float2)(r, 0.0f);
+    return DFV(r, 0.0f);
 }
 static inline df df_trunc(df a) {
     float t = trunc(a.x);
@@ -148,17 +157,17 @@ static inline df df_trunc(df a) {
 
 static inline df df_rcp(df b) {
     float r0 = 1.0f / b.x;
-    if (!isfinite(r0) || r0 == 0.0f) return (float2)(r0, 0.0f);
+    if (!isfinite(r0) || r0 == 0.0f) return DFV(r0, 0.0f);
     df e = df_sub(DF_ONE, df_mul(b, df_f(r0)));
     return df_add(df_f(r0), df_mul(df_f(r0), e));
 }
 static inline df df_sqrt(df a) {
     float s0 = sqrt(a.x);
-    if (!isfinite(s0) || s0 == 0.0f) return (float2)(s0, 0.0f);
+    if (!isfinite(s0) || s0 == 0.0f) return DFV(s0, 0.0f);
     df d = df_sub(a, df_mul(df_f(s0), df_f(s0)));
     float corr = (d.x + d.y) * (0.5f / s0);
     float r1, r2; r1 = quick_two_sum(s0, corr, &r2);
-    return (float2)(r1, r2);
+    return DFV(r1, r2);
 }
 
 /* ---- sincos: reduce by pi/2 (df arithmetic, args pre-reduced to [0,2pi) by
@@ -222,10 +231,10 @@ static inline df df_exp_taylor(df r) {
     p = df_add(df_mul(p, r), DF_ONE);
     return p;
 }
-static inline df df_ldexp(df a, int k) { return (float2)(ldexp(a.x, k), ldexp(a.y, k)); }
+static inline df df_ldexp(df a, int k) { return DFV(ldexp(a.x, k), ldexp(a.y, k)); }
 static inline df df_exp(df x) {
     if (isnan(x.x)) return x;
-    if (x.x > 25.0f)  return (float2)(7.2e10f, 0.0f);   /* huge finite, see mreal.h */
+    if (x.x > 25.0f)  return DFV(7.2e10f, 0.0f);   /* huge finite, see mreal.h */
     if (x.x < -87.0f) return DF_ZERO;
     float kf = round(x.x * 1.44269502f);
     int k = (int)kf;

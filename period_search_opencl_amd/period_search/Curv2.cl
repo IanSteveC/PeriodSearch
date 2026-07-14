@@ -2,21 +2,21 @@
 void mrqcof_curve2(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* alpha,
-	__global double* beta,
-	__local double (*dydaT)[DYT_STRIDE],
-	__local double* s2wS,
-	__local double* dwsS,
-	__local double* dyS,
+	__global df* alpha,
+	__global df* beta,
+	__local df (*dydaT)[DYT_STRIDE],
+	__local df* s2wS,
+	__local df* dwsS,
+	__local df* dyS,
 	int inrel,
 	int lpoints,
-	__global double* scr)
+	__global df* scr)
 {
 	/* runtime-sized work arrays, one slice per work-group */
-	__global double* dytempG = scr + (*CUDA_CC).offDytemp;
-	__global double* ytempG = scr + (*CUDA_CC).offYtemp;
+	__global df* dytempG = scr + (*CUDA_CC).offDytemp;
+	__global df* ytempG = scr + (*CUDA_CC).offYtemp;
 	int l, jp, j, k, m, lnp1, lnp2, Lpoints1 = lpoints + 1;
-	double dy, sig2i, wt, ymod, coef1, coef, wght, ltrial_chisq;
+	df dy, sig2i, wt, ymod, coef1, coef, wght, ltrial_chisq;
 
 	int3 blockIdx, threadIdx;
 	blockIdx.x = get_group_id(0);
@@ -68,7 +68,7 @@ void mrqcof_curve2(
 			//if (threadIdx.x == 0)
 			//	printf("[%d][%3d][%d] coef: %10.7f\n", blockIdx.x, threadIdx.x, jp, coef);
 
-			double yytmp = ytempG[jp];
+			df yytmp = ytempG[jp];
 			coef1 = yytmp / (*CUDA_LCC).ave;
 
 			//if (blockIdx.x == 0 && threadIdx.x == 0)
@@ -120,7 +120,7 @@ void mrqcof_curve2(
 	   dydaT[p][l] is point jp0+p's staged derivative row (renormalization
 	   already applied by the in-place pass above), 1-based parameter l. */
 	int jp0, p, P;
-	double wp[CURVE2_K];
+	df wp[CURVE2_K];
 
 	for (jp0 = 1; jp0 <= lpoints; jp0 += CURVE2_K)
 	{
@@ -130,7 +130,7 @@ void mrqcof_curve2(
 		/* stage the tile: consecutive work-items copy consecutive addresses */
 		for (m = threadIdx.x; m < P * DYT_STRIDE; m += BLOCK_DIM)
 		{
-			((__local double*)&dydaT[0][0])[m] = dytempG[(jp0 - 1) * DYT_STRIDE + m];
+			((__local df*)&dydaT[0][0])[m] = dytempG[(jp0 - 1) * DYT_STRIDE + m];
 		}
 
 		/* per-point scalars (ymod comes from the renormalized ytemp) */
@@ -141,7 +141,7 @@ void mrqcof_curve2(
 			sig2i = 1 / ((*CUDA_CC).Sig[lnp2 + jp] * (*CUDA_CC).Sig[lnp2 + jp]);
 			wght = (*CUDA_CC).Weight[lnp2 + jp];
 			dy = (*CUDA_CC).Brightness[lnp2 + jp] - ymod;
-			double sig2iwght = sig2i * wght;
+			df sig2iwght = sig2i * wght;
 			s2wS[threadIdx.x] = sig2iwght;
 			dwsS[threadIdx.x] = dy * sig2iwght;
 			dyS[threadIdx.x] = dy;
@@ -166,14 +166,14 @@ void mrqcof_curve2(
 				tmpl++;
 				for (m = tmpl; m <= tmph; m++)
 				{
-					double acc = 0;
+					df acc = 0;
 					for (p = 0; p < P; p++)
 						acc += wp[p] * dydaT[p][m];
 					alpha[j * (*CUDA_CC).Mfit1 + m] = alpha[j * (*CUDA_CC).Mfit1 + m] + acc;
 				} /* m */
 				if (threadIdx.x == 0)
 				{
-					double bacc = 0;
+					df bacc = 0;
 					for (p = 0; p < P; p++)
 						bacc += dwsS[p] * dydaT[p][l];
 					beta[j] = beta[j] + bacc;
@@ -189,7 +189,7 @@ void mrqcof_curve2(
 
 					for (m = latmpl; m <= latmph; m++)
 					{
-						double acc = 0;
+						df acc = 0;
 						for (p = 0; p < P; p++)
 							acc += wp[p] * dydaT[p][m];
 						alpha[j * (*CUDA_CC).Mfit1 + m] = alpha[j * (*CUDA_CC).Mfit1 + m] + acc;
@@ -202,13 +202,13 @@ void mrqcof_curve2(
 							if ((*CUDA_CC).ia[m])
 							{
 								k++;
-								double acc = 0;
+								df acc = 0;
 								for (p = 0; p < P; p++)
 									acc += wp[p] * dydaT[p][m];
 								alpha[j * (*CUDA_CC).Mfit1 + k] = alpha[j * (*CUDA_CC).Mfit1 + k] + acc;
 							}
 						} /* m */
-						double bacc = 0;
+						df bacc = 0;
 						for (p = 0; p < P; p++)
 							bacc += dwsS[p] * dydaT[p][l];
 						beta[j] = beta[j] + bacc;
@@ -236,14 +236,14 @@ void mrqcof_curve2(
 				if (tmpl == 1) tmpl++;
 				for (m = tmpl; m <= tmph; m++)
 				{
-					double acc = 0;
+					df acc = 0;
 					for (p = 0; p < P; p++)
 						acc += wp[p] * dydaT[p][m];
 					alpha[j * (*CUDA_CC).Mfit1 + m - 1] = alpha[j * (*CUDA_CC).Mfit1 + m - 1] + acc;
 				} /* m */
 				if (threadIdx.x == 0)
 				{
-					double bacc = 0;
+					df bacc = 0;
 					for (p = 0; p < P; p++)
 						bacc += dwsS[p] * dydaT[p][l];
 					beta[j] = beta[j] + bacc;
@@ -262,7 +262,7 @@ void mrqcof_curve2(
 					if (tmpl == 1) tmpl++;
 					for (m = tmpl; m <= latmph; m++)
 					{
-						double acc = 0;
+						df acc = 0;
 						for (p = 0; p < P; p++)
 							acc += wp[p] * dydaT[p][m];
 						alpha[j * (*CUDA_CC).Mfit1 + m - 1] = alpha[j * (*CUDA_CC).Mfit1 + m - 1] + acc;
@@ -275,13 +275,13 @@ void mrqcof_curve2(
 							if ((*CUDA_CC).ia[m])
 							{
 								k++;
-								double acc = 0;
+								df acc = 0;
 								for (p = 0; p < P; p++)
 									acc += wp[p] * dydaT[p][m];
 								alpha[j * (*CUDA_CC).Mfit1 + k] = alpha[j * (*CUDA_CC).Mfit1 + k] + acc;
 							}
 						} /* m */
-						double bacc = 0;
+						df bacc = 0;
 						for (p = 0; p < P; p++)
 							bacc += dwsS[p] * dydaT[p][l];
 						beta[j] = beta[j] + bacc;

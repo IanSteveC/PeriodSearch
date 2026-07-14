@@ -7,15 +7,15 @@
 int mrqmin_1_end(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__local double* covL,
-	__local double* daL,
+	__local df* covL,
+	__local df* daL,
 	__local int* ipivL,
-	__local double* shBig,
+	__local df* shBig,
 	__local int* shIrow,
 	__local int* shIcol,
-	__local double* pivBC,
+	__local df* pivBC,
 	__local int* icolBC,
-	__global double* alphaG)
+	__global df* alphaG)
 {
 	int j;
 	int3 threadIdx, blockIdx;
@@ -88,10 +88,10 @@ int mrqmin_1_end(
 void mrqmin_2_end(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* scr)
+	__global df* scr)
 {
-	__global double* alphaG = scr + (*CUDA_CC).offAlpha;
-	__global double* covarG = scr + (*CUDA_CC).offCovar;
+	__global df* alphaG = scr + (*CUDA_CC).offAlpha;
+	__global df* covarG = scr + (*CUDA_CC).offCovar;
 
 	int j, k, l;
 	int3 blockIdx, threadIdx;

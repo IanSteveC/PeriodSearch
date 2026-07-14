@@ -466,6 +466,7 @@ cl_int ClPrepare(cl_int deviceId, cl_double* beta_pole, cl_double* lambda_pole, 
 #if !defined _WIN32
     // Load CL file, build CL program object, create CL kernel object
     std::ifstream constantsFile("constants.h", std::ios::in | std::ios::binary);
+    std::ifstream df64File("df64.cl", std::ios::in | std::ios::binary);
     std::ifstream globalsFile("GlobalsCL.h", std::ios::in | std::ios::binary);
     std::ifstream intrinsicsFile("Intrinsics.cl", std::ios::in | std::ios::binary);
     std::ifstream swapFile("swap.cl", std::ios::in | std::ios::binary);
@@ -482,6 +483,7 @@ cl_int ClPrepare(cl_int deviceId, cl_double* beta_pole, cl_double* lambda_pole, 
 #else
     // Load CL file, build CL program object, create CL kernel object
     std::ifstream constantsFile("period_search/constants.h");
+    std::ifstream df64File("period_search/df64.cl");
     std::ifstream globalsFile("period_search/GlobalsCL.h");
     std::ifstream intrinsicsFile("period_search/Intrinsics.cl");
     std::ifstream swapFile("period_search/swap.cl");
@@ -501,6 +503,7 @@ cl_int ClPrepare(cl_int deviceId, cl_double* beta_pole, cl_double* lambda_pole, 
 
     // 1. First load all helper and function Cl files which will be used by the kernels;
     st << constantsFile.rdbuf();
+    st << df64File.rdbuf();   /* FP32: df64 library before the structs use df */
     st << globalsFile.rdbuf();
     st << intrinsicsFile.rdbuf();
     st << swapFile.rdbuf();

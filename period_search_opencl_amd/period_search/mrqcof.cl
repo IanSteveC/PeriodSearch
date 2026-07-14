@@ -16,9 +16,9 @@
 void mrqcof_start(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* cg,
-	__global double* alpha,
-	__global double* beta)
+	__global df* cg,
+	__global df* alpha,
+	__global df* beta)
 {
 	int3 threadIdx, blockIdx;
 	threadIdx.x = get_local_id(0);
@@ -101,10 +101,10 @@ void mrqcof_start(
 void mrqcof_matrix(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* cg,
+	__global df* cg,
 	int Lpoints,
 	int num,
-	__global double* scr)
+	__global df* scr)
 {
 	matrix_neo(CUDA_LCC, CUDA_CC, cg, (*CUDA_LCC).np, Lpoints, num, scr);
 }
@@ -112,20 +112,20 @@ void mrqcof_matrix(
 void mrqcof_curve1(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* cg,
-	__local double* tmave,
+	__global df* cg,
+	__local df* tmave,
 	int Inrel,
 	int Lpoints,
 	int num,
-	__global double* scr)
+	__global df* scr)
 {
 	/* runtime-sized work arrays, one slice per work-group */
-	__global double* dytempG = scr + (*CUDA_CC).offDytemp;
-	__global double* ytempG = scr + (*CUDA_CC).offYtemp;
-	//__local double tmave[BLOCK_DIM];  // __shared__
+	__global df* dytempG = scr + (*CUDA_CC).offDytemp;
+	__global df* ytempG = scr + (*CUDA_CC).offYtemp;
+	//__local df tmave[BLOCK_DIM];  // __shared__
 	__private int Lpoints1 = Lpoints + 1;
 	__private int k, lnp, jp;
-	__private double lave;
+	__private df lave;
 
 	lnp = (*CUDA_LCC).np;
 	lave = (*CUDA_LCC).ave;
@@ -215,19 +215,19 @@ void mrqcof_curve1(
 void mrqcof_curve1_last(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* a,
-	__global double* alpha,
-	__global double* beta,
-	__local double* res,
+	__global df* a,
+	__global df* alpha,
+	__global df* beta,
+	__local df* res,
 	int Inrel,
 	int Lpoints,
-	__global double* scr)
+	__global df* scr)
 {
 	/* runtime-sized work arrays, one slice per work-group */
-	__global double* dytempG = scr + (*CUDA_CC).offDytemp;
-	__global double* ytempG = scr + (*CUDA_CC).offYtemp;
+	__global df* dytempG = scr + (*CUDA_CC).offDytemp;
+	__global df* ytempG = scr + (*CUDA_CC).offYtemp;
 	int l, jp, lnp;
-	double ymod, lave;
+	df ymod, lave;
 	int3 threadIdx, blockIdx;
 	threadIdx.x = get_local_id(0);
 	blockIdx.x = get_group_id(0);
@@ -300,10 +300,10 @@ void mrqcof_curve1_last(
 	}
 }
 
-double mrqcof_end(
+df mrqcof_end(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* alpha)
+	__global df* alpha)
 {
 	int j, k;
 	int3 threadIdx, blockIdx;

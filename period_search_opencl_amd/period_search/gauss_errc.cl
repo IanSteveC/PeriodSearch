@@ -23,18 +23,18 @@
 int gauss_errc(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__local double* covL,   /* [DYT_STRIDE * DYT_STRIDE], indexed with Mfit1 stride */
-	__local double* daL,    /* [DYT_STRIDE] */
+	__local df* covL,   /* [DYT_STRIDE * DYT_STRIDE], indexed with Mfit1 stride */
+	__local df* daL,    /* [DYT_STRIDE] */
 	__local int* ipivL,     /* [DYT_STRIDE] */
-	__local double* shBig,  /* [BLOCK_DIM] */
+	__local df* shBig,  /* [BLOCK_DIM] */
 	__local int* shIrow,    /* [BLOCK_DIM] */
 	__local int* shIcol,    /* [BLOCK_DIM] */
-	__local double* pivBC,  /* [1] pivinv broadcast */
+	__local df* pivBC,  /* [1] pivinv broadcast */
 	__local int* icolBC,    /* [1] icol broadcast */
-	__global double* alphaG)
+	__global df* alphaG)
 {
-	double big, dum;
-	double tmpSwap;
+	df big, dum;
+	df tmpSwap;
 	int i, licol = 0, irow = 0, j, k, l, ll;
 	int n = (*CUDA_CC).Mfit;
 	int mfit1 = (*CUDA_CC).Mfit1;
@@ -87,7 +87,7 @@ int gauss_errc(
 				{
 					if (ipivL[k] == 0)
 					{
-						double tmpcov = fabs(covL[ixx]);
+						df tmpcov = fabs(covL[ixx]);
 						if (tmpcov >= big)
 						{
 							big = tmpcov;
@@ -175,7 +175,7 @@ int gauss_errc(
 		for (l = brtmpl; l <= brtmph; l++)
 		{
 			int qq = icolBC[0] * mfit1 + l;
-			double covar1 = covL[qq] * pivBC[0];
+			df covar1 = covL[qq] * pivBC[0];
 			covL[qq] = covar1;
 		}
 

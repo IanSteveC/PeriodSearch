@@ -1,3 +1,6 @@
+/* FP32 build: the FP64 bit-cast intrinsics here are unused by the active
+   kernels and rely on `double`; disabled. */
+#ifndef PS_FP32_OCL
 /*
     FROM stackoverflow: https://stackoverflow.com/questions/42856717/intrinsics-equivalent-to-the-cuda-type-casting-intrinsics-double2loint-doub
     You can express these operations via a union. This will not create extra overhead with modern compilers as long as optimization is on (nvcc -O3 ...).
@@ -102,3 +105,5 @@ int double2loint(double val)
 //    return result;
 //}
 
+
+#endif

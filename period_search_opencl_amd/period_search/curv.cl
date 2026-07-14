@@ -6,12 +6,12 @@
 void curv(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__global double* cg,
+	__global df* cg,
 	int brtmpl,
 	int brtmph)
 {
 	int n;
-	double fsum, g;
+	df fsum, g;
 	int3 blockIdx, threadIdx;
 	blockIdx.x = get_group_id(0);
 	threadIdx.x = get_local_id(0);

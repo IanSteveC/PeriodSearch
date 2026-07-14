@@ -1,6 +1,6 @@
-#pragma OPENCL FP_CONTRACT ON
+#pragma OPENCL FP_CONTRACT OFF  /* df64: two_prod must not be contracted */
 
-#pragma OPENCL EXTENSION cl_khr_fp64 : enable
+/* FP32 build: no cl_khr_fp64 - all reals are df64 (float2), see df64.cl */
 #pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
 #pragma OPENCL EXTENSION cl_khr_global_int32_extended_atomics : enable
 #pragma OPENCL EXTENSION cl_khr_local_int32_base_atomics : enable
@@ -16,46 +16,46 @@
 //#endif
 typedef struct mfreq_context
 {
-	//double* Area;
-	//double* Dg;
-	//double* alpha;
-	//double* covar;
-	//double* dytemp;
-	//double* ytemp;
+	//df* Area;
+	//df* Dg;
+	//df* alpha;
+	//df* covar;
+	//df* dytemp;
+	//df* ytemp;
 
-	double Area[MAX_N_FAC + 1];
+	df Area[MAX_N_FAC + 1];
 	/* The point- and fit-dimensioned work arrays (alpha, covar, dytemp,
 	   ytemp, jp_*, e_*, de, de0) live in a separate runtime-sized scratch
 	   buffer - one slice of freq_context.scrStride doubles per work-group,
 	   at the offsets recorded in freq_context - instead of compile-time
 	   worst-case arrays here. That cuts per-context memory ~6x (2.27 MB ->
 	   ~0.4 MB for typical workunits). */
-	double beta[MAX_N_PAR + 1];
-	double atry[MAX_N_PAR + 1];
-	double da[MAX_N_PAR + 1];
-	double cg[MAX_N_PAR + 1];
-	double Blmat[4][4];
-	double Dblm[3][4][4];
-	double dave[MAX_N_PAR + 1];
-	double dyda[MAX_N_PAR + 1];
+	df beta[MAX_N_PAR + 1];
+	df atry[MAX_N_PAR + 1];
+	df da[MAX_N_PAR + 1];
+	df cg[MAX_N_PAR + 1];
+	df Blmat[4][4];
+	df Dblm[3][4][4];
+	df dave[MAX_N_PAR + 1];
+	df dyda[MAX_N_PAR + 1];
 
-	double sh_big[BLOCK_DIM];
-	double chck[4];
-	double pivinv;
-	double ave;
-	double freq;
-	double Alamda;
-	double Chisq;
-	double Ochisq;
-	double rchisq;
-	double trial_chisq;
-	double iter_diff, dev_old, dev_new;
+	df sh_big[BLOCK_DIM];
+	df chck[4];
+	df pivinv;
+	df ave;
+	df freq;
+	df Alamda;
+	df Chisq;
+	df Ochisq;
+	df rchisq;
+	df trial_chisq;
+	df iter_diff, dev_old, dev_new;
 
 	int Niter;
 	int np, np1, np2;
 	int isInvalid, isAlamda, isNiter;
 	int icol;
-	//double conw_r;
+	//df conw_r;
 
 	int ipiv[MAX_N_PAR + 1];
 	int indxc[MAX_N_PAR + 1];
@@ -73,32 +73,32 @@ typedef struct mfreq_context
 //#endif
 struct freq_context
 {
-	double Phi_0;
-	double logCl;
-	double cl;
-	//double logC;
-	double lambda_pole[N_POLES + 1];
-	double beta_pole[N_POLES + 1];
+	df Phi_0;
+	df logCl;
+	df cl;
+	//df logC;
+	df lambda_pole[N_POLES + 1];
+	df beta_pole[N_POLES + 1];
 
 
-	double par[4];
-	double Alamda_start;
-	double Alamda_incr;
+	df par[4];
+	df Alamda_start;
+	df Alamda_incr;
 
-	//double cgFirst[MAX_N_PAR + 1];
-	double tim[MAX_N_OBS + 1];
-	double ee[MAX_N_OBS + 1][3];	// double* ee;
-	double ee0[MAX_N_OBS + 1][3];	// double* ee0;
-	double Sig[MAX_N_OBS + 1];
-	double Weight[MAX_N_OBS + 1];
-	double Brightness[MAX_N_OBS + 1];
-	double Fc[MAX_N_FAC + 1][MAX_LM + 1];
-	double Fs[MAX_N_FAC + 1][MAX_LM + 1];
-	double Darea[MAX_N_FAC + 1];
-	double Nor[MAX_N_FAC + 1][3];
-	double Dsph[MAX_N_FAC + 1][MAX_N_PAR + 1];
-	double Pleg[MAX_N_FAC + 1][MAX_LM + 1][MAX_LM + 1];
-	double conw_r;
+	//df cgFirst[MAX_N_PAR + 1];
+	df tim[MAX_N_OBS + 1];
+	df ee[MAX_N_OBS + 1][3];	// df* ee;
+	df ee0[MAX_N_OBS + 1][3];	// df* ee0;
+	df Sig[MAX_N_OBS + 1];
+	df Weight[MAX_N_OBS + 1];
+	df Brightness[MAX_N_OBS + 1];
+	df Fc[MAX_N_FAC + 1][MAX_LM + 1];
+	df Fs[MAX_N_FAC + 1][MAX_LM + 1];
+	df Darea[MAX_N_FAC + 1];
+	df Nor[MAX_N_FAC + 1][3];
+	df Dsph[MAX_N_FAC + 1][MAX_N_PAR + 1];
+	df Pleg[MAX_N_FAC + 1][MAX_LM + 1][MAX_LM + 1];
+	df conw_r;
 
 	int ia[MAX_N_PAR + 1];
 
@@ -147,6 +147,6 @@ struct freq_context
 //#endif
 struct freq_result
 {
-	double dark_best, per_best, dev_best, dev_best_x2, la_best, be_best, freq;
+	df dark_best, per_best, dev_best, dev_best_x2, la_best, be_best, freq;
 	int isReported, isInvalid, isNiter;
 };

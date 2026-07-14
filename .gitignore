@@ -147,3 +147,5 @@ diag/
 # Include the .github directory and its contents
 !/.github/
 !/.github/**
+
+*.fp64bak

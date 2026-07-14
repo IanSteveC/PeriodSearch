@@ -3,10 +3,10 @@
 //  8.11.2006
 
 
-double conv(
+df conv(
 	__global struct mfreq_context* CUDA_LCC,
 	__global struct freq_context* CUDA_CC,
-	__local double* res,
+	__local df* res,
 	int nc,
 	int tmpl,
 	int tmph,
@@ -14,8 +14,8 @@ double conv(
 	int brtmph)
 {
 	int i, j, k;
-	double tmp = 0.0;
-	double dtmp;
+	df tmp = 0.0;
+	df dtmp;
 	int3 threadIdx, blockIdx;
 	threadIdx.x = get_local_id(0);
 	blockIdx.x = get_group_id(0);

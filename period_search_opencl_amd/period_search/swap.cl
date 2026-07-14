@@ -1,6 +1,6 @@
-void SwapDouble(double a, double b) 
+void SwapDouble(df a, df b) 
 { 
-	double temp = a; 
+	df temp = a; 
 	a = b; 
 	b = temp; 
 }
