@@ -138,6 +138,72 @@ static inline cl_int psSetArgDf(cl_kernel k, cl_uint idx, double v)
 #define PS_MFC_PREFIX offsetof(mfreq_context, Niter)
 #define PS_FC_PREFIX  offsetof(freq_context, ia)
 #define PS_FR_PREFIX  offsetof(freq_result, isReported)
+
+/* TEMP DIAG: raw readback of block-0 mfreq_context; decodes df slots */
+#ifdef PS_DF_DEBUG
+static double psDfDecode(double raw)
+{
+#ifdef PS_REAL64
+    return raw;
+#else
+    cl_float2 v; memcpy(&v, &raw, 8); return (double)v.s[0] + (double)v.s[1];
+#endif
+}
+static void psDumpMCC(cl_command_queue q, cl_mem buf, const char* label)
+{
+    static mfreq_context mc;
+    clEnqueueReadBuffer(q, buf, CL_BLOCKING, 0, sizeof(mfreq_context), &mc, 0, NULL, NULL);
+    fprintf(stderr,
+        "[%-12s] freq=%-12.9g Alamda=%-12.9g Chisq=%-12.9g Ochisq=%-12.9g rchisq=%-12.9g dev_new=%-12.9g dev_old=%-12.9g "
+        "beta1=%-12.9g beta2=%-12.9g da1=%-12.9g da2=%-12.9g atry1=%-12.9g Niter=%d isNiter=%d isAlamda=%d\n",
+        label, psDfDecode(mc.freq), psDfDecode(mc.Alamda), psDfDecode(mc.Chisq), psDfDecode(mc.Ochisq),
+        psDfDecode(mc.rchisq), psDfDecode(mc.dev_new), psDfDecode(mc.dev_old),
+        psDfDecode(mc.beta[1]), psDfDecode(mc.beta[2]), psDfDecode(mc.da[1]), psDfDecode(mc.da[2]), psDfDecode(mc.atry[1]),
+        mc.Niter, mc.isNiter, mc.isAlamda);
+}
+#define PS_DUMP(q, buf, label) psDumpMCC(q, buf, label)
+static void psDumpVec(cl_command_queue q, cl_mem buf, const char* label)
+{
+    static mfreq_context mc;
+    clEnqueueReadBuffer(q, buf, CL_BLOCKING, 0, sizeof(mfreq_context), &mc, 0, NULL, NULL);
+    fprintf(stderr, "[vec %s] da:", label);
+    for (int j = 1; j <= 60; j++) fprintf(stderr, " %.9g", psDfDecode(mc.da[j]));
+    fprintf(stderr, "\n[vec %s] atry:", label);
+    for (int j = 1; j <= 60; j++) fprintf(stderr, " %.9g", psDfDecode(mc.atry[j]));
+    fprintf(stderr, "\n[vec %s] cg:", label);
+    for (int j = 1; j <= 60; j++) fprintf(stderr, " %.9g", psDfDecode(mc.cg[j]));
+    fprintf(stderr, "\n[vec %s] beta:", label);
+    for (int j = 1; j <= 60; j++) fprintf(stderr, " %.9g", psDfDecode(mc.beta[j]));
+    fprintf(stderr, "\n");
+}
+#define PS_DUMPVEC(q, buf, label) psDumpVec(q, buf, label)
+static void psDumpIter(cl_command_queue q, cl_mem buf, int iter)
+{
+    static mfreq_context mc;
+    clEnqueueReadBuffer(q, buf, CL_BLOCKING, 0, sizeof(mfreq_context), &mc, 0, NULL, NULL);
+    fprintf(stderr, "[it %3d] Alamda=%-11.6g Chisq=%-13.9g Ochisq=%-13.9g rchisq=%-13.9g dev_new=%-11.9g dev_old=%-11.9g iter_diff=%-11.9g Niter=%d isNiter=%d isAlamda=%d\n",
+        iter, psDfDecode(mc.Alamda), psDfDecode(mc.Chisq), psDfDecode(mc.Ochisq), psDfDecode(mc.rchisq),
+        psDfDecode(mc.dev_new), psDfDecode(mc.dev_old), psDfDecode(mc.iter_diff), mc.Niter, mc.isNiter, mc.isAlamda);
+}
+static void psDumpFR(cl_command_queue q, cl_mem buf, int nblocks)
+{
+    static freq_result fr[16];
+    int nb = nblocks > 16 ? 16 : nblocks;
+    clEnqueueReadBuffer(q, buf, CL_BLOCKING, 0, sizeof(freq_result) * nb, fr, 0, NULL, NULL);
+    for (int b = 0; b < nb; b++)
+        fprintf(stderr, "[FR %2d] per=%-12.9g dev=%-12.9g x2=%-12.9g dark=%-9.6g la=%-9.6g be=%-9.6g isRep=%d isInv=%d\n",
+            b, psDfDecode(fr[b].per_best), psDfDecode(fr[b].dev_best), psDfDecode(fr[b].dev_best_x2),
+            psDfDecode(fr[b].dark_best), psDfDecode(fr[b].la_best), psDfDecode(fr[b].be_best),
+            fr[b].isReported, fr[b].isInvalid);
+}
+#define PS_DUMPITER(q, buf, it) psDumpIter(q, buf, it)
+#define PS_DUMPFR(q, buf, nb) psDumpFR(q, buf, nb)
+#else
+#define PS_DUMP(q, buf, label)
+#define PS_DUMPVEC(q, buf, label)
+#define PS_DUMPITER(q, buf, it)
+#define PS_DUMPFR(q, buf, nb)
+#endif
 // =======================================================================
 
 //using namespace std;
@@ -1565,6 +1631,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
             err = EnqueueNDRangeKernel(queue, kernelCalculatePreparePole, 1, NULL, &CUDA_grid_dim_precalc, &sLocal, 0, NULL, NULL);
             if (getError(err)) return err;
             //clFinish(queue);
+            if (n == 1) PS_DUMP(queue, CUDA_MCC2, "PreparePole");
 
             //void* pFb = clEnqueueMapBuffer(queue, CUDA_CC2, CL_BLOCKING, CL_MAP_READ, 0, faSize, 0, NULL, NULL, &err);
             //clFlush(queue);
@@ -1608,10 +1675,12 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter1Begin, 1, NULL, &CUDA_grid_dim_precalc, &sLocal, 0, NULL, NULL);
                 if (getError(err)) return err;
                 //clFinish(queue);
+                if (n == 1 && count == 1) PS_DUMP(queue, CUDA_MCC2, "Iter1Begin");
 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter1Mrqcof1Start, 1, NULL, &totalWorkItems, &local, 0, NULL, NULL);
                 if (getError(err)) return err;
                 //clFinish(queue);
+                if (n == 1 && count == 1) PS_DUMP(queue, CUDA_MCC2, "Mrqcof1Start");
                 for (iC = 1; iC < l_curves; iC++)
                 {
                     err = clSetKernelArg(kernelCalculateIter1Mrqcof1Matrix, 2, sizeof(l_points[iC]), &(l_points[iC]));
@@ -1647,10 +1716,13 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter1Mrqcof1End, 1, NULL, &CUDA_grid_dim_precalc, &sLocal, 0, NULL, NULL);
                 if (getError(err)) return err;
                 //clFinish(queue);
+                if (n == 1 && count == 1) PS_DUMP(queue, CUDA_MCC2, "Mrqcof1End");
 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter1Mrqmin1End, 1, NULL, &totalWorkItems, &local, 0, NULL, NULL);
                 if (getError(err)) return err;
                 //clFinish(queue);
+                if (n == 1 && count == 1) PS_DUMP(queue, CUDA_MCC2, "Mrqmin1End");
+                if (n == 1 && count == 1) PS_DUMPVEC(queue, CUDA_MCC2, "Mrqmin1End");
 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter1Mrqcof2Start, 1, NULL, &totalWorkItems, &local, 0, NULL, NULL);
                 if (getError(err)) return err;
@@ -1691,14 +1763,17 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter1Mrqcof2End, 1, NULL, &CUDA_grid_dim_precalc, &sLocal, 0, NULL, NULL);
                 if (getError(err)) return err;
                 //clFinish(queue);
+                if (n == 1 && count == 1) PS_DUMP(queue, CUDA_MCC2, "Mrqcof2End");
 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter1Mrqmin2End, 1, NULL, &CUDA_grid_dim_precalc, &sLocal, 0, NULL, NULL);
                 if (getError(err)) return err;
                 //clFinish(queue);
+                if (n == 1 && count == 1) PS_DUMP(queue, CUDA_MCC2, "Mrqmin2End");
 
                 err = EnqueueNDRangeKernel(queue, kernelCalculateIter2, 1, NULL, &totalWorkItems, &local, 0, NULL, NULL);
                 if (getError(err)) return err;
                 //clFinish(queue); // ***
+                if (n == 1) PS_DUMPITER(queue, CUDA_MCC2, count);
 
                 err = clEnqueueReadBuffer(queue, CUDA_End, CL_BLOCKING, 0, sizeof(theEnd), &theEnd, 0, NULL, NULL);
 
@@ -1709,6 +1784,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
             err = EnqueueNDRangeKernel(queue, kernelCalculateFinishPole, 1, NULL, &CUDA_grid_dim_precalc, &sLocal, 0, NULL, NULL);
             if (getError(err)) return err;
             //clFinish(queue);
+            if (n == 1) PS_DUMPFR(queue, CUDA_FR, (int)CUDA_grid_dim_precalc);
         }
 
         printf("\n");
@@ -2008,7 +2084,10 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
 #else
     // auto cgFirst = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(double) * (MAX_N_PAR + 1), cg_first, err);
     // queue.enqueueWriteBuffer(cgFirst, CL_TRUE, 0, sizeof(double) * (MAX_N_PAR + 1), cg_first);
-    cl_mem cgFirst = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(cl_double) * (MAX_N_PAR + 1), cg_first, &err);
+    /* FP32: the device reads df (float2) slots, so the raw host doubles must be
+       pack-written (USE_HOST_PTR would hand the device unpacked doubles) */
+    cl_mem cgFirst = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_double) * (MAX_N_PAR + 1), cg_first, &err);
+    psPackWrite(queue, cgFirst, cg_first, sizeof(cl_double) * (MAX_N_PAR + 1), sizeof(double), sizeof(double));
 #endif
 
 #if !defined _WIN32
@@ -2136,12 +2215,11 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
     // cl_uint faSize = sizeof(freq_context);
     // auto CUDA_CC = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, faSize, Fa, err);
     // queue.enqueueWriteBuffer(CUDA_CC, CL_BLOCKING, 0, faSize, Fa);
-    auto memFa = (freq_context*)aligned_alloc(128, faSize);
-    cl_mem CUDA_CC = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, faSize, memFa, &err);
-    void* pFa = clEnqueueMapBuffer(queue, CUDA_CC, CL_BLOCKING, CL_MAP_WRITE, 0, faSize, 0, NULL, NULL, &err);
-    memcpy(pFa, Fa, faSize);
-    clEnqueueUnmapMemObject(queue, CUDA_CC, pFa, 0, NULL, NULL);
-    clFlush(queue);
+    /* FP32: upload the freq_context through the pack (df) boundary, matching
+       ClPrecalc; the old map+memcpy path handed the device raw doubles */
+    auto pFa = (freq_context*)aligned_alloc(128, faSize);
+    cl_mem CUDA_CC = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, faSize, pFa, &err);
+    psPackWrite(queue, CUDA_CC, Fa, faSize, sizeof(freq_context), PS_FC_PREFIX);
 #endif
 #else // WIN32
 #if defined (INTEL)
@@ -2150,12 +2228,9 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
     // cl_uint faSize = sizeof(freq_context);
     // auto CUDA_CC = cl::Buffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, faSize, Fa, err);
     // queue.enqueueWriteBuffer(CUDA_CC, CL_BLOCKING, 0, faSize, Fa);
-    auto memFa = (freq_context*)_aligned_malloc(faSize, 128);
-    cl_mem CUDA_CC = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, faSize, memFa, &err);
-    void* pFa = clEnqueueMapBuffer(queue, CUDA_CC, CL_BLOCKING, CL_MAP_WRITE, 0, faSize, 0, NULL, NULL, &err);
-    memcpy(pFa, Fa, faSize);
-    clEnqueueUnmapMemObject(queue, CUDA_CC, pFa, 0, NULL, NULL);
-    clFlush(queue);
+    auto pFa = (freq_context*)_aligned_malloc(faSize, 128);
+    cl_mem CUDA_CC = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, faSize, pFa, &err);
+    psPackWrite(queue, CUDA_CC, Fa, faSize, sizeof(freq_context), PS_FC_PREFIX);
 #endif
 #endif
 

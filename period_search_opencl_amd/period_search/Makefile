@@ -68,6 +68,19 @@ EXECUTABLE_FILES = $(PROGS:%=$(OBJ_DIR)/%)
 
 all: $(EXECUTABLE_FILES)
 
+# The OpenCL kernels the app really runs are the ocl_src_kernelSource string in
+# kernels.cpp (the .cl files are only read in _DEBUG builds). Regenerate it
+# whenever any kernel source changes; order must match the runtime concatenation
+# in Start_OpenCl.cpp.
+KERNEL_SRCS = constants.h df64.cl GlobalsCL.h Intrinsics.cl swap.cl blmatrix.cl\
+	curv.cl Curv2.cl bright.cl conv.cl mrqcof.cl gauss_errc.cl mrqmin.cl\
+	test.cl Start.cl
+
+kernels.cpp: $(KERNEL_SRCS) gen_kernels_cpp.py
+	python3 gen_kernels_cpp.py $@ $(KERNEL_SRCS)
+
+$(OBJ_DIR)/Start_OpenCl.o: kernels.cpp
+
 $(OBJ_DIR)/libstdc++.a:
 	ln -s `g++ -print-file-name=libstdc++.a` $(OBJ_DIR)/libstdc++.a
 
