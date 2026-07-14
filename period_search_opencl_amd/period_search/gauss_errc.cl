@@ -62,7 +62,7 @@ int gauss_errc(
 			covL[ixx] = alphaG[ixx];
 		}
 		int qq = j * mfit1 + j;
-		covL[qq] = alphaG[qq] * (1 + (*CUDA_LCC).Alamda);
+		covL[qq] = df_mul(alphaG[qq], (df_add(DF_ONE, (*CUDA_LCC).Alamda)));
 		daL[j] = (*CUDA_LCC).beta[j];
 	}
 
@@ -75,7 +75,7 @@ int gauss_errc(
 
 	for (i = 1; i <= n; i++)
 	{
-		big = 0;
+		big = DF_ZERO;
 		irow = 0;
 		licol = 0;
 		for (j = brtmpl; j <= brtmph; j++)
@@ -87,8 +87,8 @@ int gauss_errc(
 				{
 					if (ipivL[k] == 0)
 					{
-						df tmpcov = fabs(covL[ixx]);
-						if (tmpcov >= big)
+						df tmpcov = df_fabs(covL[ixx]);
+						if (df_ge(tmpcov, big))
 						{
 							big = tmpcov;
 							irow = j;
@@ -117,7 +117,7 @@ int gauss_errc(
 
 			for (j = 1; j < BLOCK_DIM; j++)
 			{
-				if (shBig[j] >= big)
+				if (df_ge(shBig[j], big))
 				{
 					big = shBig[j];
 					irow = shIrow[j];
@@ -143,7 +143,7 @@ int gauss_errc(
 
 			int covarIdx = icolBC[0] * mfit1 + icolBC[0];
 
-			if (covL[covarIdx] == 0.0)
+			if (df_eq(covL[covarIdx], df_f(0.0f)))
 			{
 				/* singular pivot: report the (partial) step like the old code
 				   did, then bail with error 2 */
@@ -157,17 +157,17 @@ int gauss_errc(
 					if ((*CUDA_CC).ia[l2])
 					{
 						j++;
-						(*CUDA_LCC).atry[l2] = (*CUDA_LCC).cg[l2] + (*CUDA_LCC).da[j];
+						(*CUDA_LCC).atry[l2] = df_add((*CUDA_LCC).cg[l2], (*CUDA_LCC).da[j]);
 					}
 				}
 
 				return(2);
 			}
 
-			pivBC[0] = 1.0 / covL[covarIdx];
-			covL[covarIdx] = 1.0;
+			pivBC[0] = df_div(df_f(1.0f), covL[covarIdx]);
+			covL[covarIdx] = df_f(1.0f);
 
-			daL[icolBC[0]] = daL[icolBC[0]] * pivBC[0];
+			daL[icolBC[0]] = df_mul(daL[icolBC[0]], pivBC[0]);
 		}
 
 		barrier(CLK_LOCAL_MEM_FENCE); //__syncthreads();
@@ -175,7 +175,7 @@ int gauss_errc(
 		for (l = brtmpl; l <= brtmph; l++)
 		{
 			int qq = icolBC[0] * mfit1 + l;
-			df covar1 = covL[qq] * pivBC[0];
+			df covar1 = df_mul(covL[qq], pivBC[0]);
 			covL[qq] = covar1;
 		}
 
@@ -188,15 +188,15 @@ int gauss_errc(
 				int ixx = ll * mfit1;
 				int jxx = icolBC[0] * mfit1;
 				dum = covL[ixx + icolBC[0]];
-				covL[ixx + icolBC[0]] = 0.0;
+				covL[ixx + icolBC[0]] = df_f(0.0f);
 				ixx++;
 				jxx++;
 				for (l = 1; l <= n; l++, ixx++, jxx++)
 				{
-					covL[ixx] -= covL[jxx] * dum;
+					covL[ixx] = df_sub(covL[ixx], df_mul(covL[jxx], dum));
 				}
 
-				daL[ll] -= daL[icolBC[0]] * dum;
+				daL[ll] = df_sub(daL[ll], df_mul(daL[icolBC[0]], dum));
 			}
 		}
 

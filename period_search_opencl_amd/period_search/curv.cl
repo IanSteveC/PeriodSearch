@@ -24,7 +24,7 @@ void curv(
 		//if (blockIdx.x == 0)
 		//	printf("i: %d\n", i);
 
-		g = 0;
+		g = DF_ZERO;
 		n = 0;
 		for (int m = 0; m <= (*CUDA_CC).Mmax; m++) // Mmax = 6
 		{
@@ -34,22 +34,22 @@ void curv(
 				//if (blockIdx.x == 0 && threadIdx.x == 0)
 				//	printf("cg[%3d]: %10.7f\n", n, cg[n]);
 
-				fsum = cg[n] * (*CUDA_CC).Fc[i][m];
+				fsum = df_mul(cg[n], (*CUDA_CC).Fc[i][m]);
 				if (m != 0)
 				{
 					n++;
 					//if (blockIdx.x == 0 && threadIdx.x == 0)
 					//	printf("cg[%3d]: %10.7f\n", n, cg[n]);
 
-					fsum = fsum + cg[n] * (*CUDA_CC).Fs[i][m];
+					fsum = df_add(fsum, df_mul(cg[n], (*CUDA_CC).Fs[i][m]));
 				}
 
-				g = g + (*CUDA_CC).Pleg[i][l][m] * fsum;
+				g = df_add(g, df_mul((*CUDA_CC).Pleg[i][l][m], fsum));
 			}
 		}
 
-		g = exp(g);
-		(*CUDA_LCC).Area[i] = (*CUDA_CC).Darea[i] * g;
+		g = df_exp(g);
+		(*CUDA_LCC).Area[i] = df_mul((*CUDA_CC).Darea[i], g);
 
 		//if (blockIdx.x == 0)
 		//	printf("[%3d - %3d] i: %3d\n", q, threadIdx.x, i);

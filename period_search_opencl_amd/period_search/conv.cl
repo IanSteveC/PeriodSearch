@@ -14,7 +14,7 @@ df conv(
 	int brtmph)
 {
 	int i, j, k;
-	df tmp = 0.0;
+	df tmp = df_f(0.0f);
 	df dtmp;
 	int3 threadIdx, blockIdx;
 	threadIdx.x = get_local_id(0);
@@ -25,7 +25,7 @@ df conv(
 	for (i = brtmpl; i <= brtmph; i++, j++)
 	{
 		//tmp += CUDA_Area[j] * CUDA_Nor[i][nc];
-		tmp += (*CUDA_LCC).Area[j] * (*CUDA_CC).Nor[i][nc];
+		tmp = df_add(tmp, df_mul((*CUDA_LCC).Area[j], (*CUDA_CC).Nor[i][nc]));
 	}
 
 	res[threadIdx.x] = tmp;
@@ -40,27 +40,27 @@ df conv(
 	while (k > 1)
 	{
 		if (threadIdx.x < k)
-			res[threadIdx.x] += res[threadIdx.x + k];
+			res[threadIdx.x] = df_add(res[threadIdx.x], res[threadIdx.x + k]);
 		k = k >> 1;
 		barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE); //__syncthreads();
 	}
 
 	if (threadIdx.x == 0)
 	{
-		tmp = res[0] + res[1];
+		tmp = df_add(res[0], res[1]);
 	}
 	//parallel reduction end
 	barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE); //__syncthreads();
 
 	for (j = tmpl; j <= tmph; j++)
 	{
-		dtmp = 0;
+		dtmp = DF_ZERO;
 		if (j <= (*CUDA_CC).Ncoef)
 		{
 			for (i = 1; i <= (*CUDA_CC).Numfac; i++)
 			{
 				/* Darea[i] * Dg[i][j] == Area[i] * Dsph[i][j] (Area = Darea*g) */
-				dtmp += (*CUDA_LCC).Area[i] * (*CUDA_CC).Dsph[i][j] * (*CUDA_CC).Nor[i][nc];
+				dtmp = df_add(dtmp, df_mul(df_mul((*CUDA_LCC).Area[i], (*CUDA_CC).Dsph[i][j]), (*CUDA_CC).Nor[i][nc]));
 
 				//if (blockIdx.x == 0 && j == 8)
 				//	printf("[%d][%3d]  Darea[%4d]: %.7f, Dg[%4d]: %.7f, Nor[%3d][%3d]: %10.7f\n",

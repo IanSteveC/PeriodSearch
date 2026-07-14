@@ -34,10 +34,10 @@ void mrqcof_curve2(
 	tmpl++;
 
 	int matmph, matmpl;									// threadIdx.x == 1
-	matmph = (*CUDA_CC).ma / BLOCK_DIM;					// 0
-	if ((*CUDA_CC).ma % BLOCK_DIM) matmph++;			// 1
-	matmpl = threadIdx.x * matmph;						// 1
-	matmph = matmpl + matmph;							// 2
+	matmph = (*CUDA_CC).ma / BLOCK_DIM; // 0
+	if ((*CUDA_CC).ma % BLOCK_DIM) matmph++; // 1
+	matmpl = threadIdx.x * matmph; // 1
+	matmph = matmpl + matmph; // 2
 	if (matmph > (*CUDA_CC).ma) matmph = (*CUDA_CC).ma;
 	matmpl++;											// 2
 
@@ -51,30 +51,30 @@ void mrqcof_curve2(
 
 	/*   if ((*CUDA_LCC).Lastcall != 1) always ==0
 		 {*/
-	if (inrel /*==1*/)
+	if (inrel)
 	{
 		for (jp = tmpl; jp <= tmph; jp++)
 		{
 			lnp1++;
 			int ixx = (jp - 1) * DYT_STRIDE + 1;
 			/* Set the size scale coeff. deriv. explicitly zero for relative lcurves */
-			dytempG[ixx] = 0;
+			dytempG[ixx] = DF_ZERO;
 
 			//if (blockIdx.x == 0)
 			//	printf("[%d][%d] dytemp[%3d]: %10.7f\n", blockIdx.x, jp, ixx, dytempG[ixx]);
 
-			coef = (*CUDA_CC).Sig[lnp1] * lpoints / (*CUDA_LCC).ave;
+			coef = df_div(df_mul((*CUDA_CC).Sig[lnp1], df_f(lpoints)), (*CUDA_LCC).ave);
 
 			//if (threadIdx.x == 0)
 			//	printf("[%d][%3d][%d] coef: %10.7f\n", blockIdx.x, threadIdx.x, jp, coef);
 
 			df yytmp = ytempG[jp];
-			coef1 = yytmp / (*CUDA_LCC).ave;
+			coef1 = df_div(yytmp, (*CUDA_LCC).ave);
 
 			//if (blockIdx.x == 0 && threadIdx.x == 0)
 			//	printf("[Device | mrqcof_curve2_1] [%3d]  yytmp[%3d]: %10.7f, ave: %10.7f\n", threadIdx.x, jp, yytmp, (*CUDA_LCC).ave);
 
-			ytempG[jp] = coef * yytmp;
+			ytempG[jp] = df_mul(coef, yytmp);
 
 			//if (blockIdx.x == 0)
 			//	printf("[Device][%d][%3d] ytemp[%3d]: %10.7f\n", blockIdx.x, threadIdx.x, jp, ytempG[jp]);
@@ -86,7 +86,7 @@ void mrqcof_curve2(
 
 			for (l = 2; l <= (*CUDA_CC).ma; l++, ixx++)
 			{
-				dytempG[ixx] = coef * (dytempG[ixx] - coef1 * (*CUDA_LCC).dave[l]);
+				dytempG[ixx] = df_mul(coef, (df_sub(dytempG[ixx], df_mul(coef1, (*CUDA_LCC).dave[l]))));
 
 				//if (blockIdx.x == 0 && threadIdx.x == 0)
 				//	printf("[Device | mrqcof_curve2_1] [%3d]  coef1: %10.7f, dave[%3d]: %10.7f, dytemp[%3d]: %10.7f\n",
@@ -138,12 +138,12 @@ void mrqcof_curve2(
 		{
 			jp = jp0 + threadIdx.x;
 			ymod = ytempG[jp];
-			sig2i = 1 / ((*CUDA_CC).Sig[lnp2 + jp] * (*CUDA_CC).Sig[lnp2 + jp]);
+			sig2i = df_div(DF_ONE, (df_mul((*CUDA_CC).Sig[lnp2 + jp], (*CUDA_CC).Sig[lnp2 + jp])));
 			wght = (*CUDA_CC).Weight[lnp2 + jp];
-			dy = (*CUDA_CC).Brightness[lnp2 + jp] - ymod;
-			df sig2iwght = sig2i * wght;
+			dy = df_sub((*CUDA_CC).Brightness[lnp2 + jp], ymod);
+			df sig2iwght = df_mul(sig2i, wght);
 			s2wS[threadIdx.x] = sig2iwght;
-			dwsS[threadIdx.x] = dy * sig2iwght;
+			dwsS[threadIdx.x] = df_mul(dy, sig2iwght);
 			dyS[threadIdx.x] = dy;
 		}
 		barrier(CLK_LOCAL_MEM_FENCE);
@@ -155,7 +155,7 @@ void mrqcof_curve2(
 			{
 				j++;
 				for (p = 0; p < P; p++)
-					wp[p] = dydaT[p][l] * s2wS[p];
+					wp[p] = df_mul(dydaT[p][l], s2wS[p]);
 
 				//precalc thread boundaries (same per-row partition as before)
 				tmph = l / BLOCK_DIM;
@@ -166,17 +166,17 @@ void mrqcof_curve2(
 				tmpl++;
 				for (m = tmpl; m <= tmph; m++)
 				{
-					df acc = 0;
+					df acc = DF_ZERO;
 					for (p = 0; p < P; p++)
-						acc += wp[p] * dydaT[p][m];
-					alpha[j * (*CUDA_CC).Mfit1 + m] = alpha[j * (*CUDA_CC).Mfit1 + m] + acc;
+						acc = df_add(acc, df_mul(wp[p], dydaT[p][m]));
+					alpha[j * (*CUDA_CC).Mfit1 + m] = df_add(alpha[j * (*CUDA_CC).Mfit1 + m], acc);
 				} /* m */
 				if (threadIdx.x == 0)
 				{
-					df bacc = 0;
+					df bacc = DF_ZERO;
 					for (p = 0; p < P; p++)
-						bacc += dwsS[p] * dydaT[p][l];
-					beta[j] = beta[j] + bacc;
+						bacc = df_add(bacc, df_mul(dwsS[p], dydaT[p][l]));
+					beta[j] = df_add(beta[j], bacc);
 				}
 			} /* l */
 			for (; l <= (*CUDA_CC).lastma; l++)
@@ -185,14 +185,14 @@ void mrqcof_curve2(
 				{
 					j++;
 					for (p = 0; p < P; p++)
-						wp[p] = dydaT[p][l] * s2wS[p];
+						wp[p] = df_mul(dydaT[p][l], s2wS[p]);
 
 					for (m = latmpl; m <= latmph; m++)
 					{
-						df acc = 0;
+						df acc = DF_ZERO;
 						for (p = 0; p < P; p++)
-							acc += wp[p] * dydaT[p][m];
-						alpha[j * (*CUDA_CC).Mfit1 + m] = alpha[j * (*CUDA_CC).Mfit1 + m] + acc;
+							acc = df_add(acc, df_mul(wp[p], dydaT[p][m]));
+						alpha[j * (*CUDA_CC).Mfit1 + m] = df_add(alpha[j * (*CUDA_CC).Mfit1 + m], acc);
 					} /* m */
 					if (threadIdx.x == 0)
 					{
@@ -202,16 +202,16 @@ void mrqcof_curve2(
 							if ((*CUDA_CC).ia[m])
 							{
 								k++;
-								df acc = 0;
+								df acc = DF_ZERO;
 								for (p = 0; p < P; p++)
-									acc += wp[p] * dydaT[p][m];
-								alpha[j * (*CUDA_CC).Mfit1 + k] = alpha[j * (*CUDA_CC).Mfit1 + k] + acc;
+									acc = df_add(acc, df_mul(wp[p], dydaT[p][m]));
+								alpha[j * (*CUDA_CC).Mfit1 + k] = df_add(alpha[j * (*CUDA_CC).Mfit1 + k], acc);
 							}
 						} /* m */
-						df bacc = 0;
+						df bacc = DF_ZERO;
 						for (p = 0; p < P; p++)
-							bacc += dwsS[p] * dydaT[p][l];
-						beta[j] = beta[j] + bacc;
+							bacc = df_add(bacc, df_mul(dwsS[p], dydaT[p][l]));
+						beta[j] = df_add(beta[j], bacc);
 					}
 				}
 			} /* l */
@@ -223,7 +223,7 @@ void mrqcof_curve2(
 			{
 				j++;
 				for (p = 0; p < P; p++)
-					wp[p] = dydaT[p][l] * s2wS[p];
+					wp[p] = df_mul(dydaT[p][l], s2wS[p]);
 
 				//precalc thread boundaries
 				tmph = l / BLOCK_DIM;
@@ -236,17 +236,17 @@ void mrqcof_curve2(
 				if (tmpl == 1) tmpl++;
 				for (m = tmpl; m <= tmph; m++)
 				{
-					df acc = 0;
+					df acc = DF_ZERO;
 					for (p = 0; p < P; p++)
-						acc += wp[p] * dydaT[p][m];
-					alpha[j * (*CUDA_CC).Mfit1 + m - 1] = alpha[j * (*CUDA_CC).Mfit1 + m - 1] + acc;
+						acc = df_add(acc, df_mul(wp[p], dydaT[p][m]));
+					alpha[j * (*CUDA_CC).Mfit1 + m - 1] = df_add(alpha[j * (*CUDA_CC).Mfit1 + m - 1], acc);
 				} /* m */
 				if (threadIdx.x == 0)
 				{
-					df bacc = 0;
+					df bacc = DF_ZERO;
 					for (p = 0; p < P; p++)
-						bacc += dwsS[p] * dydaT[p][l];
-					beta[j] = beta[j] + bacc;
+						bacc = df_add(bacc, df_mul(dwsS[p], dydaT[p][l]));
+					beta[j] = df_add(beta[j], bacc);
 				}
 			} /* l */
 			for (; l <= (*CUDA_CC).lastma; l++)
@@ -255,17 +255,17 @@ void mrqcof_curve2(
 				{
 					j++;
 					for (p = 0; p < P; p++)
-						wp[p] = dydaT[p][l] * s2wS[p];
+						wp[p] = df_mul(dydaT[p][l], s2wS[p]);
 
 					tmpl = latmpl;
 					//m==1
 					if (tmpl == 1) tmpl++;
 					for (m = tmpl; m <= latmph; m++)
 					{
-						df acc = 0;
+						df acc = DF_ZERO;
 						for (p = 0; p < P; p++)
-							acc += wp[p] * dydaT[p][m];
-						alpha[j * (*CUDA_CC).Mfit1 + m - 1] = alpha[j * (*CUDA_CC).Mfit1 + m - 1] + acc;
+							acc = df_add(acc, df_mul(wp[p], dydaT[p][m]));
+						alpha[j * (*CUDA_CC).Mfit1 + m - 1] = df_add(alpha[j * (*CUDA_CC).Mfit1 + m - 1], acc);
 					} /* m */
 					if (threadIdx.x == 0)
 					{
@@ -275,16 +275,16 @@ void mrqcof_curve2(
 							if ((*CUDA_CC).ia[m])
 							{
 								k++;
-								df acc = 0;
+								df acc = DF_ZERO;
 								for (p = 0; p < P; p++)
-									acc += wp[p] * dydaT[p][m];
-								alpha[j * (*CUDA_CC).Mfit1 + k] = alpha[j * (*CUDA_CC).Mfit1 + k] + acc;
+									acc = df_add(acc, df_mul(wp[p], dydaT[p][m]));
+								alpha[j * (*CUDA_CC).Mfit1 + k] = df_add(alpha[j * (*CUDA_CC).Mfit1 + k], acc);
 							}
 						} /* m */
-						df bacc = 0;
+						df bacc = DF_ZERO;
 						for (p = 0; p < P; p++)
-							bacc += dwsS[p] * dydaT[p][l];
-						beta[j] = beta[j] + bacc;
+							bacc = df_add(bacc, df_mul(dwsS[p], dydaT[p][l]));
+						beta[j] = df_add(beta[j], bacc);
 					}
 				}
 			} /* l */
@@ -293,7 +293,7 @@ void mrqcof_curve2(
 		/* chi-square: same per-point terms in the same ascending order */
 		for (p = 0; p < P; p++)
 		{
-			ltrial_chisq = ltrial_chisq + dyS[p] * dyS[p] * s2wS[p];
+			ltrial_chisq = df_add(ltrial_chisq, df_mul(df_mul(dyS[p], dyS[p]), s2wS[p]));
 		}
 
 		/* everyone must finish reading dydaT before the next tile overwrites it */

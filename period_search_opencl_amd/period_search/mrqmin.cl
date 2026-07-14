@@ -75,7 +75,7 @@ int mrqmin_1_end(
 			if ((*CUDA_CC).ia[l])
 			{
 				j++;
-				(*CUDA_LCC).atry[l] = (*CUDA_LCC).cg[l] + (*CUDA_LCC).da[j];
+				(*CUDA_LCC).atry[l] = df_add((*CUDA_LCC).cg[l], (*CUDA_LCC).da[j]);
 			}
 	}
 
@@ -98,9 +98,9 @@ void mrqmin_2_end(
 	blockIdx.x = get_group_id(0);
 	threadIdx.x = get_local_id(0);
 
-	if ((*CUDA_LCC).Chisq < (*CUDA_LCC).Ochisq)
+	if (df_lt((*CUDA_LCC).Chisq, (*CUDA_LCC).Ochisq))
 	{
-		(*CUDA_LCC).Alamda = (*CUDA_LCC).Alamda / (*CUDA_CC).Alamda_incr;
+		(*CUDA_LCC).Alamda = df_div((*CUDA_LCC).Alamda, (*CUDA_CC).Alamda_incr);
 		for (j = 1; j <= (*CUDA_CC).Mfit; j++)
 		{
 			for (k = 1; k <= (*CUDA_CC).Mfit; k++)
@@ -120,7 +120,7 @@ void mrqmin_2_end(
 	}
 	else
 	{
-		(*CUDA_LCC).Alamda = (*CUDA_CC).Alamda_incr * (*CUDA_LCC).Alamda;
+		(*CUDA_LCC).Alamda = df_mul((*CUDA_CC).Alamda_incr, (*CUDA_LCC).Alamda);
 		(*CUDA_LCC).Chisq = (*CUDA_LCC).Ochisq;
 	}
 

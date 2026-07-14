@@ -57,14 +57,14 @@ __kernel void ClCalculatePrepare(
     //printf("Idx: %d | isInvalid: %d\n", x, (*CUDA_LCC).isInvalid);
 
     //CUDA_mCC[x].freq = freq_start - (n - 1) * freq_step;
-    (*CUDA_LCC).freq = freq_start - (n - 1) * freq_step;
+    (*CUDA_LCC).freq = df_sub(freq_start, df_mul(df_f((n - 1)), freq_step));
 
     ///* initial poles */
-    (*CUDA_LFR).per_best = 0.0;
-    (*CUDA_LFR).dark_best = 0.0;
-    (*CUDA_LFR).la_best = 0.0;
-    (*CUDA_LFR).be_best = 0.0;
-    (*CUDA_LFR).dev_best = 1e40;
+    (*CUDA_LFR).per_best = df_f(0.0f);
+    (*CUDA_LFR).dark_best = df_f(0.0f);
+    (*CUDA_LFR).la_best = df_f(0.0f);
+    (*CUDA_LFR).be_best = df_f(0.0f);
+    (*CUDA_LFR).dev_best = df_f(1e40f);
 
     //printf("n: %4d, CUDA_CC[%3d].freq: %10.7f, CUDA_FR[%3d].la_best: %10.7f, isInvalid: %4d \n", n, x, (*CUDA_LCC).freq, x, (*CUDA_LFR).la_best, (*CUDA_LCC).isInvalid);
 
@@ -113,7 +113,7 @@ __kernel void ClCalculatePreparePole(
     //if (blockIdx.x == 0 && threadIdx.x == 0)
     //	printf("[Device] PreparePole > ma: %d\n", (*CUDA_CC).ma);
 
-    df period = 1.0 / (*CUDA_LCC).freq;
+    df period = df_div(df_f(1.0f), (*CUDA_LCC).freq);
 
     //* starts from the initial ellipsoid */
     for (int i = 1; i <= (*CUDA_CC).Ncoef; i++)
@@ -139,16 +139,16 @@ __kernel void ClCalculatePreparePole(
     //printf("cg[%d]: %.7f | cg[%d]: %.7f\n", (*CUDA_CC).Ncoef + 1, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1], (*CUDA_CC).Ncoef + 2, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
 
     /* The formulas use beta measured from the pole */
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1] = 90.0 - (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1];
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1] = df_sub(df_f(90.0f), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]);
     //printf("90 - cg[%d]: %.7f\n", (*CUDA_CC).Ncoef + 1, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]);
 
     /* conversion of lambda, beta to radians */
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1] = DEG2RAD * (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1];
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2] = DEG2RAD * (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2];
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1] = df_mul(df_f(DEG2RAD), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]);
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2] = df_mul(df_f(DEG2RAD), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
     //printf("cg[%d]: %.7f | cg[%d]: %.7f\n", (*CUDA_CC).Ncoef + 1, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1], (*CUDA_CC).Ncoef + 2, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
 
     /* Use omega instead of period */
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3] = 24.0 * 2.0 * PI / period;
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3] = df_div(df_mul(df_mul(df_f(24.0f), df_f(2.0f)), df_f(PI)), period);
 
     //if (threadIdx.x == 0)
     //{
@@ -165,14 +165,14 @@ __kernel void ClCalculatePreparePole(
     }
 
     /* Lommel-Seeliger part */
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3 + (*CUDA_CC).Nphpar + 2] = 1;
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3 + (*CUDA_CC).Nphpar + 2] = DF_ONE;
     //if (blockIdx.x == 0)
     //{
     //	printf("cg[%3d]: %10.7f\n", (*CUDA_CC).Ncoef + 3 + (*CUDA_CC).Nphpar + 2, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3 + (*CUDA_CC).Nphpar + 2]);
     //}
 
     /* Use logarithmic formulation for Lambert to keep it positive */
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3 + (*CUDA_CC).Nphpar + 1] = log((*CUDA_CC).cl);
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3 + (*CUDA_CC).Nphpar + 1] = df_log((*CUDA_CC).cl);
     //(*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3 + (*CUDA_CC).Nphpar + 1] = (*CUDA_CC).logCl;   //log((*CUDA_CC).cl);
 
 
@@ -185,12 +185,12 @@ __kernel void ClCalculatePreparePole(
     /* Levenberg-Marquardt loop */
     // moved to global iter_max,iter_min,iter_dif_max
     //
-    (*CUDA_LCC).rchisq = -1;
-    (*CUDA_LCC).Alamda = -1;
+    (*CUDA_LCC).rchisq = df_i(-1);
+    (*CUDA_LCC).Alamda = df_i(-1);
     (*CUDA_LCC).Niter = 0;
-    (*CUDA_LCC).iter_diff = 1e40;
-    (*CUDA_LCC).dev_old = 1e30;
-    (*CUDA_LCC).dev_new = 0;
+    (*CUDA_LCC).iter_diff = df_f(1e40f);
+    (*CUDA_LCC).dev_old = df_f(1e30f);
+    (*CUDA_LCC).dev_new = DF_ZERO;
     //	(*CUDA_LCC).Lastcall=0; always ==0
     (*CUDA_LFR).isReported = 0;
 
@@ -232,17 +232,17 @@ __kernel void ClCalculateIter1Begin(
     }
 
     //                                   ?    < 50                                 ?       > 0                                   ?      < 0
-    (*CUDA_LCC).isNiter = (((*CUDA_LCC).Niter < CUDA_n_iter_max) && ((*CUDA_LCC).iter_diff > CUDA_iter_diff_max)) || ((*CUDA_LCC).Niter < CUDA_n_iter_min);
+    (*CUDA_LCC).isNiter = (((*CUDA_LCC).Niter < CUDA_n_iter_max) && (df_gt((*CUDA_LCC).iter_diff, CUDA_iter_diff_max))) || ((*CUDA_LCC).Niter < CUDA_n_iter_min);
     (*CUDA_FR).isNiter = (*CUDA_LCC).isNiter;
 
     //printf("[%d] isNiter: %d, Alamda: %10.7f\n", blockIdx.x, (*CUDA_LCC).isNiter, (*CUDA_LCC).Alamda);
 
     if ((*CUDA_LCC).isNiter)
     {
-        if ((*CUDA_LCC).Alamda < 0)
+        if (df_lt((*CUDA_LCC).Alamda, DF_ZERO))
         {
             (*CUDA_LCC).isAlamda = 1;
-            (*CUDA_LCC).Alamda = CUDA_Alamda_start; /* initial alambda */
+            (*CUDA_LCC).Alamda = CUDA_Alamda_start;
         }
         else
         {
@@ -797,7 +797,7 @@ __kernel void ClCalculateIter2(
 
     if ((*CUDA_LCC).isNiter)
     {
-        if ((*CUDA_LCC).Niter == 1 || (*CUDA_LCC).Chisq < (*CUDA_LCC).Ochisq)
+        if ((*CUDA_LCC).Niter == 1 || df_lt((*CUDA_LCC).Chisq, (*CUDA_LCC).Ochisq))
         {
             if (threadIdx.x == 0)
             {
@@ -819,13 +819,13 @@ __kernel void ClCalculateIter2(
             {
                 for (i = 1; i <= 3; i++)
                 {
-                    (*CUDA_LCC).chck[i] = 0;
+                    (*CUDA_LCC).chck[i] = DF_ZERO;
 
 
                     for (j = 1; j <= (*CUDA_CC).Numfac; j++)
                     {
                         df qq;
-                        qq = (*CUDA_LCC).chck[i] + (*CUDA_LCC).Area[j] * (*CUDA_CC).Nor[j][i - 1];
+                        qq = df_add((*CUDA_LCC).chck[i], df_mul((*CUDA_LCC).Area[j], (*CUDA_CC).Nor[j][i - 1]));
 
                         //if (blockIdx.x == 0)
                         //	printf("[%d] [%d][%3d] qq: %10.7f, chck[%d]: %10.7f, Area[%3d]: %10.7f, Nor[%3d][%d]: %10.7f\n",
@@ -840,7 +840,7 @@ __kernel void ClCalculateIter2(
 
                 //printf("[%d] chck[1]: %10.7f, chck[2]: %10.7f, chck[3]: %10.7f\n", blockIdx.x, (*CUDA_LCC).chck[1], (*CUDA_LCC).chck[2], (*CUDA_LCC).chck[3]);
 
-                (*CUDA_LCC).rchisq = (*CUDA_LCC).Chisq - (pow((*CUDA_LCC).chck[1], 2.0) + pow((*CUDA_LCC).chck[2], 2.0) + pow((*CUDA_LCC).chck[3], 2.0)) * pow((*CUDA_CC).conw_r, 2.0);
+                (*CUDA_LCC).rchisq = df_sub((*CUDA_LCC).Chisq, df_mul((df_add(df_add(df_sqr((*CUDA_LCC).chck[1]), df_sqr((*CUDA_LCC).chck[2])), df_sqr((*CUDA_LCC).chck[3]))), df_sqr((*CUDA_CC).conw_r)));
                 //(*CUDA_LCC).rchisq = (*CUDA_LCC).Chisq - ((*CUDA_LCC).chck[1] * (*CUDA_LCC).chck[1] + (*CUDA_LCC).chck[2] * (*CUDA_LCC).chck[2] + (*CUDA_LCC).chck[3] * (*CUDA_LCC).chck[3]) * ((*CUDA_CC).conw_r * (*CUDA_CC).conw_r);
             }
         }
@@ -852,7 +852,7 @@ __kernel void ClCalculateIter2(
             //if (blockIdx.x == 0)
             //	printf("ndata - 3: %3d\n", (*CUDA_CC).ndata - 3);
 
-            (*CUDA_LCC).dev_new = sqrt((*CUDA_LCC).rchisq / ((*CUDA_CC).ndata - 3));
+            (*CUDA_LCC).dev_new = df_sqrt(df_div((*CUDA_LCC).rchisq, df_f(((*CUDA_CC).ndata - 3))));
 
             //if (blockIdx.x == 233)
             //{
@@ -862,9 +862,9 @@ __kernel void ClCalculateIter2(
             //}
 
             // NOTE: only if this step is better than the previous, 1e-10 is for numeric errors
-            if ((*CUDA_LCC).dev_old - (*CUDA_LCC).dev_new > 1e-10)
+            if (df_gt(df_sub((*CUDA_LCC).dev_old, (*CUDA_LCC).dev_new), df_f(1e-10f)))
             {
-                (*CUDA_LCC).iter_diff = (*CUDA_LCC).dev_old - (*CUDA_LCC).dev_new;
+                (*CUDA_LCC).iter_diff = df_sub((*CUDA_LCC).dev_old, (*CUDA_LCC).dev_new);
                 (*CUDA_LCC).dev_old = (*CUDA_LCC).dev_new;
             }
             //		(*CUDA_LFR).Niter=(*CUDA_LCC).Niter;
@@ -891,10 +891,10 @@ __kernel void ClCalculateFinishPole(
 
     if ((*CUDA_LCC).isInvalid) return;
 
-    df totarea = 0;
+    df totarea = DF_ZERO;
     for (i = 1; i <= (*CUDA_CC).Numfac; i++)
     {
-        totarea = totarea + (*CUDA_LCC).Area[i];
+        totarea = df_add(totarea, (*CUDA_LCC).Area[i]);
     }
 
     //if(blockIdx.x == 2)
@@ -904,35 +904,35 @@ __kernel void ClCalculateFinishPole(
     //	printf("rchisq: %10.7f, Chisq: %10.7f \n", (*CUDA_LCC).rchisq, (*CUDA_LCC).Chisq);
 
     //const df sum = pow((*CUDA_LCC).chck[1], 2.0) + pow((*CUDA_LCC).chck[2], 2.0) + pow((*CUDA_LCC).chck[3], 2.0);
-    const df sum = ((*CUDA_LCC).chck[1] * (*CUDA_LCC).chck[1]) + ((*CUDA_LCC).chck[2] * (*CUDA_LCC).chck[2]) + ((*CUDA_LCC).chck[3] * (*CUDA_LCC).chck[3]);
+    df sum = df_add(df_add((df_mul((*CUDA_LCC).chck[1], (*CUDA_LCC).chck[1])), (df_mul((*CUDA_LCC).chck[2], (*CUDA_LCC).chck[2]))), (df_mul((*CUDA_LCC).chck[3], (*CUDA_LCC).chck[3])));
     //printf("[FinishPole] [%d] sum: %10.7f\n", blockIdx.x, sum);
 
-    const df dark = sqrt(sum);
+    df dark = df_sqrt(sum);
 
     //if (blockIdx.x == 232 || blockIdx.x == 233)
     //	printf("[%d] sum: %12.8f, dark: %12.8f, totarea: %12.8f, dark_best: %12.8f\n", blockIdx.x, sum, dark, totarea, dark / totarea * 100);
 
     /* period solution */
-    const df period = 2 * PI / (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3];
+    df period = df_div(df_f(2 * PI), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3]);
 
     /* pole solution */
-    const df la_tmp = RAD2DEG * (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2];
+    df la_tmp = df_mul(df_f(RAD2DEG), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
 
     //if (la_tmp < 0.0)
     //	printf("[CalculateFinishPole] la_best: %4.0f\n", la_tmp);
 
-    const df be_tmp = 90 - RAD2DEG * (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1];
+    df be_tmp = df_sub(df_i(90), df_mul(df_f(RAD2DEG), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]));
 
     //if (blockIdx.x == 2)
         //printf("[%d] dev_new: %10.7f, dev_best: %10.7f\n", blockIdx.x, (*CUDA_LCC).dev_new, (*CUDA_LFR).dev_best);
 
-    if ((*CUDA_LCC).dev_new < (*CUDA_LFR).dev_best)
+    if (df_lt((*CUDA_LCC).dev_new, (*CUDA_LFR).dev_best))
     {
         (*CUDA_LFR).dev_best = (*CUDA_LCC).dev_new;
         (*CUDA_LFR).dev_best_x2 = (*CUDA_LCC).rchisq;
         (*CUDA_LFR).per_best = period;
-        (*CUDA_LFR).dark_best = dark / totarea * 100;
-        (*CUDA_LFR).la_best = la_tmp < 0 ? la_tmp + 360.0 : la_tmp;
+        (*CUDA_LFR).dark_best = df_mul(df_div(dark, totarea), df_i(100));
+        (*CUDA_LFR).la_best = (df_lt(la_tmp, DF_ZERO) ? df_add(la_tmp, df_f(360.0f)) : la_tmp);
         (*CUDA_LFR).be_best = be_tmp;
 
         //printf("[%d] dev_best: %12.8f\n", blockIdx.x, (*CUDA_LFR).dev_best);
@@ -945,9 +945,9 @@ __kernel void ClCalculateFinishPole(
         //}
     }
 
-    if (isnan((*CUDA_LFR).dark_best) == 1)
+    if (df_isnan((*CUDA_LFR).dark_best) == 1)
     {
-        (*CUDA_LFR).dark_best = 1.0;
+        (*CUDA_LFR).dark_best = df_f(1.0f);
     }
 
     //if (blockIdx.x == 2)
