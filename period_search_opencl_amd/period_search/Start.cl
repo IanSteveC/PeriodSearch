@@ -143,12 +143,12 @@ __kernel void ClCalculatePreparePole(
     //printf("90 - cg[%d]: %.7f\n", (*CUDA_CC).Ncoef + 1, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]);
 
     /* conversion of lambda, beta to radians */
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1] = df_mul(df_f(DEG2RAD), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]);
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2] = df_mul(df_f(DEG2RAD), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1] = df_mul(DF_DEG2RAD, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]);
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2] = df_mul(DF_DEG2RAD, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
     //printf("cg[%d]: %.7f | cg[%d]: %.7f\n", (*CUDA_CC).Ncoef + 1, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1], (*CUDA_CC).Ncoef + 2, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
 
     /* Use omega instead of period */
-    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3] = df_div(df_mul(df_mul(df_f(24.0f), df_f(2.0f)), df_f(PI)), period);
+    (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3] = df_div(df_mul(df_f(48.0f), DF_PI), period);
 
     //if (threadIdx.x == 0)
     //{
@@ -862,7 +862,7 @@ __kernel void ClCalculateIter2(
             //}
 
             // NOTE: only if this step is better than the previous, 1e-10 is for numeric errors
-            if (df_gt(df_sub((*CUDA_LCC).dev_old, (*CUDA_LCC).dev_new), df_f(1e-10f)))
+            if (df_gt(df_sub((*CUDA_LCC).dev_old, (*CUDA_LCC).dev_new), DF_DEVEPS))
             {
                 (*CUDA_LCC).iter_diff = df_sub((*CUDA_LCC).dev_old, (*CUDA_LCC).dev_new);
                 (*CUDA_LCC).dev_old = (*CUDA_LCC).dev_new;
@@ -913,15 +913,15 @@ __kernel void ClCalculateFinishPole(
     //	printf("[%d] sum: %12.8f, dark: %12.8f, totarea: %12.8f, dark_best: %12.8f\n", blockIdx.x, sum, dark, totarea, dark / totarea * 100);
 
     /* period solution */
-    df period = df_div(df_f(2 * PI), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3]);
+    df period = df_div(DF_2PI, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 3]);
 
     /* pole solution */
-    df la_tmp = df_mul(df_f(RAD2DEG), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
+    df la_tmp = df_mul(DF_RAD2DEG, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 2]);
 
     //if (la_tmp < 0.0)
     //	printf("[CalculateFinishPole] la_best: %4.0f\n", la_tmp);
 
-    df be_tmp = df_sub(df_i(90), df_mul(df_f(RAD2DEG), (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]));
+    df be_tmp = df_sub(df_i(90), df_mul(DF_RAD2DEG, (*CUDA_LCC).cg[(*CUDA_CC).Ncoef + 1]));
 
     //if (blockIdx.x == 2)
         //printf("[%d] dev_new: %10.7f, dev_best: %10.7f\n", blockIdx.x, (*CUDA_LCC).dev_new, (*CUDA_LFR).dev_best);

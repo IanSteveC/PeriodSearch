@@ -1,103 +1,75 @@
-# OpenCL FP32 (df64) port — STATUS: kernels run correctly; pole columns not yet matching
+# OpenCL FP32 (df64) port — STATUS: validated, pole columns match FP64 to the storage noise floor
 
-The FP32 port of the OpenCL `period_search` app (branch `opencl-fp32`) now
-runs the converted df64 kernels on the RX 6800 XT with no hardware FP64, and
-passes the project validator (period / rms / chisq). **But the pole columns
-(dark / lambda / beta), which the validator ignores, do NOT yet match the
-FP64 result on a large fraction of lines — this is the open item.** See
-`verification/README.md` for the validation matrix and `verification/POLE_AUDIT.md`
-for the per-pole analysis.
+The FP32 port of the OpenCL `period_search` app (branch `opencl-fp32`) runs
+the df64 kernels on the RX 6800 XT with no hardware FP64, passes the project
+validator, and — after the 2026-07-14 constant-truncation fix — matches the
+FP64 reference on the pole columns on 171/182 lines (the 11 remaining
+differences are genuine near-ties; the REAL64 diagnostic build now matches
+**exactly**, 182/182). See `verification/README.md` for the matrix and
+`verification/POLE_AUDIT.md` for the full analysis.
 
-## Bottom line (read this first)
+## Bottom line
 
-- period / rms / chisq: **match** the FP64 CPU baseline (182/182, 182/182,
-  181/182 within tolerance).
-- dark / lambda / beta: **do not all match.** Exact-print agreement is
-  dark 102/181, lambda 77/182, beta 65/182; ~43 lines have lambda and ~40
-  have beta off by >5°, i.e. a genuinely different pole won that line.
-- Root cause is understood and is *not* a df64 arithmetic bug (the pure-double
-  HYBRID build disagrees with the double oracle at the same rate — see
-  POLE_AUDIT.md). It is that the per-pole `dev` still differs from double by
-  ~0.4% median / up to ~2%, and in a field of near-degenerate optima that is
-  enough to reorder which starting pole wins each line. Closing that per-pole
-  `dev` gap is the remaining work.
+- period / rms / chisq: VALID, worst margins per 1.34e-05 (tol 0.1),
+  rms 1.57e-03 (0.1), chisq 3.14e-03 (0.5).
+- dark / lambda / beta: REAL64 182/182 exact print; FP32 exact print
+  151/142/136, winner flips >5° on 11 lines (down from 43 before the fix).
+  The global best line — the actual answer — matches exactly:
+  line 51, `10.75308538 (268,-35)`.
+- The residual FP32 flips are the ~49-bit float2 storage noise floor, NOT an
+  arithmetic bug: HYBRID (float2 storage, exact double compute) flips at the
+  same rate. Per-pole: 97.3% of the 2300 trials land in the same basin as the
+  double oracle; same-basin |Δdev|/dev median 1.3e-4.
 
-## The mystery from the previous session — resolved
+## The 2026-07-14 finding: `df_f()` constant truncation (read this first)
 
-The previous session left off chasing a "runtime anomaly": `Alamda` read back
-as a double `-1.0` bit pattern in the FP32 build although every standalone
-probe proved the compiled store was a correct float2. The explanation was
-none of the hypotheses (no UB, no driver bug, no miscompile):
+The previous session's conclusion ("pole disagreements are landscape
+bistability, not a defect") was **wrong**. Independent FP64 implementations
+(stock CUDA, rank8 CUDA, Windows CUDA/3080 Ti, pre-port OpenCL kernels) agree
+on the pole columns to *exact print* — the FP64 winner is robust, and the
+REAL64 diagnostic build (which flipped 90/182 lines!) was itself carrying the
+port bug, so the old per-pole audit validated the bug against itself.
 
-**The app never compiled the `.cl` files at runtime.** `Start_OpenCl.cpp`
-builds its OpenCL program from `ocl_src_kernelSource` — a C string baked into
-the binary from `period_search/kernels.cpp` (see `#include "kernels.cpp"` and
-`clCreateProgramWithSource(... &ocl_src_kernelSource ...)`). The runtime
-concatenation of `period_search/*.cl` only happens under `_DEBUG`, and even
-then it is only *dumped* to `kernelSource.cl` for inspection, never compiled.
-`kernels.cpp` predated the FP32 conversion, so every run — FP32, HYBRID,
-REAL64 — executed the *old FP64 kernels*:
+The bug class: the df conversion wrapped **double**-precision constants in
+`df_f()`, the *single-float* constructor. Worst offenders:
 
-- `Alamda = -1` in the old double source stores a genuine double −1.0 →
-  exactly the bytes observed.
-- The cg readbacks looked correct because copies are encoding-agnostic
-  (float2 bits pass through double loads/stores untouched); block 0's `freq`
-  is `freq_start - 0*step`, also a pure bit copy.
-- "`DF_REAL64` is bit-exact vs baseline" was vacuously true (it *was* the
-  original FP64 app), and `DF_HYBRID` matched FP32 bit-for-bit because the
-  `-D` flags never reached any df-aware code.
+- `bright.cl`: `df_fmod(f, df_f(2*PI))` — modulus wrong by 1.7e-7 relative
+  ⇒ phase error `floor(f/2pi)*1.7e-7` rad (up to ~1e-4 rad, epoch-dependent)
+  in every reduced rotation angle. 62/182 flips on its own.
+- `Start.cl`: `df_f(PI)` in the starting angular frequency, `df_f(DEG2RAD)`
+  on the starting pole, `df_f(RAD2DEG)`/`df_f(2*PI)` in the printed
+  period/lambda/beta, `df_f(1e-10f)` accept threshold, `df_f(TINY)`.
+- `df64.cl`: under `DF_REAL64`, `DFV(a,b)` dropped the low float — even the
+  properly-split df constants were truncated in the double diagnostic mode.
 
-Fixes (this session):
+Fix (committed on this branch): `DF_CONST(d, hi, lo)` — full double in
+REAL64, two-float split otherwise (the double literal is dropped by the
+preprocessor in float2 modes, so FP64-less compilers never see it); new
+constants `DF_DEG2RAD`, `DF_RAD2DEG`, `DF_TINY`, `DF_DEVEPS`; call sites
+fixed. Verified by swapping pristine pre-conversion kernels into the REAL64
+build (they are ABI-compatible when df=double): the fixed build's output is
+**byte-identical** to the pristine run. **Rule: never wrap a double macro in
+`df_f()` — use a `DF_CONST` constant.**
 
-1. **`kernels.cpp` is now generated by the build.** `gen_kernels_cpp.py` +
-   a Makefile rule regenerate it from the `.cl` files (same order as the
-   runtime concatenation) whenever any kernel source changes.
-2. **`ClStart` (the main phase) missed the pack boundary.** `ClPrecalc` packed
-   its uploads, but `ClStart` uploaded the `freq_context` via
-   map+`memcpy` (raw doubles) and `cgFirst` via `CL_MEM_USE_HOST_PTR` (raw
-   doubles). Both now go through `psPackWrite`, matching `ClPrecalc`. This was
-   why, after the kernels.cpp fix, the precalc phase produced perfect
-   `freq_result`s while the output file (written by the main phase) was still
-   `per=0 / dev=inf`.
+How it was found, for the next hunt: bisect by swapping pristine `.cl` files
+(from `git show '100387e~1:./<file>'`) into the build group-by-group, then
+file-by-file — under `PS_REAL64` old and new kernels link fine. The harness
+script pattern is in `verification/POLE_AUDIT.md` ("Reproduce").
 
-## Validation (standard WU, 182 lines, vs FP64 CPU baseline)
+## Earlier session context (still true)
 
-**Columns 1–3 (period / rms / chisq).** All three builds pass the *exact*
-upstream validator logic (`verification/ps_validate.cpp`): FP32 worst margins
-per=2.25e-05 (tol 0.1), rms=2.54e-03 (0.1), chisq=5.09e-03 (0.5). Per-column:
-period 182/182 within 0.1%, rms 182/182 within 2%, chisq 181/182 within 2%.
-
-**Columns 4–6 (dark / lambda / beta).** These are NOT validator-checked and do
-not all match. Exact-print agreement: dark 102/181, lambda 77/182, beta 65/182;
-43 lines have lambda off by >5° and 40 have beta off by >5°. Full method and
-evidence in `verification/POLE_AUDIT.md`. Summary of what the per-pole audit
-(the `PS_DF_DEBUG` `[pole …]` dump) established:
-
-- It is landscape bistability, not df64 error: the pure-double **HYBRID** build
-  (float2 storage, double arithmetic) flips convergence basins vs REAL64 on
-  37% of pole trials — the *same* rate as FP32 — so the winner reordering is
-  driven by ULP-level storage rounding in a non-convex fit, not by the emulated
-  arithmetic. FP32 vs HYBRID agree 97%.
-- FP32 loses no optimum: on all 39 argmax-flipped output lines, the CPU
-  baseline's winning pole is present in FP32's own 10-pole table within 30°
-  (incl. the mirror pole), at dev within ~1% of CPU.
-- Same-basin endpoints agree to ~1° (|Δλ| median 1.1°, |Δβ| median 1.4° at
-  full convergence), with no directional bias.
-
-The practical consequence: to make columns 4–6 line up with FP64, the per-pole
-`dev` gap (median ~0.4%, up to ~2%) has to shrink so near-ties stop reordering.
-That is the top remaining task below.
-
-Known/pre-existing quirks (not regressions, tolerated by the pipeline):
-
-- The first LM iteration's `mrqcof2` (χ² at `atry`) explodes to ~1e16 for
-  block 0 and is rejected; identical behaviour in REAL64, recovers fine.
+- The app compiles `kernels.cpp` (generated from the `.cl` files by
+  `gen_kernels_cpp.py`, kept in sync by the Makefile), NOT the `.cl` files at
+  runtime. Pack every host upload in BOTH `ClPrecalc` and `ClStart`
+  (`psPackWrite`); the pack is a no-op under `PS_REAL64`.
+- First LM iteration's `mrqcof2` explodes to ~1e16 for block 0 and is
+  rejected; identical in REAL64/pristine, recovers fine (pre-existing).
 - `ClCalculatePrepare`/`PreparePole`/`Iter1Begin` write some `freq_result`
-  flags through the *base* pointer (`(*CUDA_FR).isInvalid` etc.) instead of
-  the per-block `CUDA_LFR` — pre-existing (commit `5cec596` has it too);
-  the host merge only requires `isReported`.
+  flags through the base pointer instead of per-block `CUDA_LFR` —
+  pre-existing (commit `5cec596`), host merge only needs `isReported`.
 - `df_f(1e40f)` sentinels become `inf` in float2 modes (`dev_best`,
-  `iter_diff` inits). Benign for the loop logic today, worth cleaning up.
+  `iter_diff` inits, `Start.cl:67,191`). Benign for the loop logic, still
+  worth cleaning up.
 
 ## Build / run / validate
 
@@ -106,10 +78,8 @@ cd period_search
 make                          # FP32 (df64) — the real target
 make CPPFLAGS=-DPS_REAL64     # diagnostic: same kernels, df=double, no pack
 make CPPFLAGS=-DPS_HYBRID     # diagnostic: float2 storage, double compute
-make CPPFLAGS=-DPS_DF_DEBUG   # FP32 + readback dumps: per-kernel/iteration
-                              # state AND the full per-(freq,pole) freq_result
-                              # table (grep '^\[pole' stderr.txt) used for the
-                              # pole audit
+make CPPFLAGS=-DPS_DF_DEBUG   # FP32 + readback dumps incl. the per-(freq,pole)
+                              # freq_result table (grep '^\[pole' stderr.txt)
                               # (rm -f build/Release/Start_OpenCl.o first when
                               #  switching CPPFLAGS — make can't see the change)
 
@@ -119,45 +89,28 @@ cp /home/ian/builds/AST/period_search_out_win/period_search_in period_search_in
 ./period_search/build/Release/period_search_BOINC_linux_amd_opencl_110_x64_Release
 g++ -O2 -o /tmp/ps_validate verification/ps_validate.cpp   # first time only
 /tmp/ps_validate period_search_out verification/ocl_fp64_baseline.out
+python3 verification/cmp_poles.py period_search_out verification/ocl_fp64_baseline.out
 ```
 
-To probe convergence rather than the WU's 50-iteration cap (useful when
-chasing the per-pole `dev` gap): set the WU input line-11 stop condition below
-1 (e.g. `1e-6`) and raise `MAX_N_ITER` in `constants.h`. The per-pole dump then
-shows fully-converged endpoints. Remember to revert both before committing.
-
-Gotchas: BOINC *appends* to `./stderr.txt` (shell redirects capture nothing —
-delete the file between runs); `kernels.bin` is a compiled-kernel cache and
-`period_search_state` a checkpoint — stale copies cause stale binaries or a
-resume-past-the-end no-op. Test on the AMD RX 6800 XT only (the V100 is in
-use by the owner).
+Gotchas: BOINC *appends* to `./stderr.txt` (delete between runs);
+`kernels.bin` is a compiled-kernel cache and `period_search_state` a
+checkpoint — stale copies cause stale binaries or a resume-past-the-end
+no-op. Test on the AMD RX 6800 XT only (the V100 is in use by the owner).
 
 ## Remaining work (next session)
 
-1. **Close the per-pole `dev` gap so dark/lambda/beta match FP64 (top
-   priority).** FP32's converged per-pole `dev` differs from the double oracle
-   by ~0.4% median / up to ~2%; in this near-degenerate optimum field that
-   reorders which starting pole wins each output line, which is exactly why
-   columns 4–6 disagree (see the Validation section and POLE_AUDIT.md). This is
-   a *precision* gap, not a logic bug. Leads to chase, in order:
-   - **Transcendental accuracy.** `df_acos` was only improved to ~2^-38 (vs
-     ~2^-46 for the other ops); the fit's residuals run acos/sincos/log/exp
-     every iteration. Tighten `df_acos` (and re-check `df_sincos`/`df_log`)
-     in `df64.cl` and remeasure the per-pole `dev` gap.
-   - **Accumulation order.** The normal-equations build (`mrqcof_*`, rank-8
-     tile updates) and the χ² reduction sum many terms; df64 is
-     order-sensitive. Compare FP32 vs HYBRID per-pole `dev` at *one* fixed
-     pole with the `[pole …]` dump — any gap there (they share storage) is
-     pure arithmetic/order and localizes the culprit kernel.
-   - Use `-DPS_DF_DEBUG` + the convergence WU tweak above; the target is to
-     drive the median per-pole `dev` gap toward the same-basin noise floor so
-     the winner selection matches FP64 on nearly every line.
-- **FP32/FP64 build toggle** like the CUDA/HIP apps: single codebase, default
-  FP64, `FP32=1` opts in. All kernel arithmetic is already `df_*` calls, so
-  this is: make `df64.cl`'s typedef+ops switch on a macro (df=double + trivial
-  ops for FP64) and gate the host pack on the same macro — i.e. essentially
-  promote the `PS_REAL64` diagnostic mode to the supported FP64 build (host
-  packs are already no-ops under `PS_REAL64`).
-- Clean up the `1e40f`→inf sentinels (`Start.cl:67,191`).
-- Optional: fix the base-pointer `CUDA_FR` flag writes in `Start.cl` (they
-  predate this port).
+1. **FP32/FP64 build toggle** like the CUDA/HIP apps: single codebase,
+   default FP64, `FP32=1` opts in. All kernel arithmetic is already `df_*`
+   calls, so this is: promote the `PS_REAL64` diagnostic to the supported
+   FP64 build (host packs are already no-ops under `PS_REAL64`) and gate on
+   a build flag.
+2. Clean up the `1e40f`→inf sentinels (`Start.cl:67,191`) — use a large
+   finite df constant so float2 modes don't carry inf through `dev_best`/
+   `iter_diff`.
+3. Optional: fix the base-pointer `CUDA_FR` flag writes in `Start.cl`
+   (pre-existing, pre-port).
+4. NOT worth pursuing for pole agreement: tightening `df_acos`/transcendental
+   accuracy. HYBRID proves the residual 10-11 winner flips come from float2
+   *storage* rounding of iteration-carried state, which transcendental
+   accuracy cannot fix. (Tightening `df_acos` may still be worth it for
+   general robustness on other WUs, but don't expect the flip count to move.)

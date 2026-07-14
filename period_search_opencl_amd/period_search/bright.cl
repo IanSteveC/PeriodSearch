@@ -99,7 +99,7 @@ void matrix_neo(
 
 		//  matrix start
 		f = df_add(df_mul(cg[(*CUDA_CC).Ncoef0], t), (*CUDA_CC).Phi_0);
-		f = df_fmod(f, df_f(2 * PI));
+		f = df_fmod(f, DF_2PI);
 		df_sincos(f, &sf, &cf);
 
 		//if (threadIdx.x == 0)
@@ -322,7 +322,7 @@ void bright(
 		lmu = df_add(df_add(df_mul(e_1, (*CUDA_CC).Nor[i][0]), df_mul(e_2, (*CUDA_CC).Nor[i][1])), df_mul(e_3, (*CUDA_CC).Nor[i][2]));
 		lmu0 = df_add(df_add(df_mul(e0_1, (*CUDA_CC).Nor[i][0]), df_mul(e0_2, (*CUDA_CC).Nor[i][1])), df_mul(e0_3, (*CUDA_CC).Nor[i][2]));
 
-		if ((df_gt(lmu, df_f(TINY))) && (df_gt(lmu0, df_f(TINY))))
+		if ((df_gt(lmu, DF_TINY)) && (df_gt(lmu0, DF_TINY)))
 		{
 			dnom = df_add(lmu, lmu0);
 			s = df_mul(df_mul(lmu, lmu0), (df_add(cl, df_div(cls, dnom))));

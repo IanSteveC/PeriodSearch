@@ -27,7 +27,7 @@ typedef struct { float x, y; } df;
 #elif defined(DF_REAL64)
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
 typedef double df;
-#define DFV(a,b) ((double)(a))
+#define DFV(a,b) ((double)(a) + (double)(b))
 #elif defined(DF_HYBRID)
 /* diagnostic: float2 STORAGE (46-bit), but every op computed in native double.
    Isolates float-float arithmetic bugs from 46-bit storage insufficiency. */
@@ -46,16 +46,35 @@ typedef float2 df;
 #define DF_HI(a) ((a).x)
 #endif
 
-/* ---- constants (two-float splits; see gen script) ---- */
-#define DF_2PI   DFV(6.28318548f, -1.748455531e-07f)
-#define DF_PI    DFV(3.14159274f, -8.742277657e-08f)
-#define DF_PIO2  DFV(1.57079637f, -4.371138829e-08f)
-#define DF_2OPI  DFV(0.636619747f, 2.568255297e-08f)
-#define DF_LN2   DFV(0.693147182f, -1.904654212e-09f)
-#define DF_LOG2E DFV(1.44269502f, 1.925963034e-08f)
-#define DF_HALF  DFV(0.5f, 0.0f)
-#define DF_ONE   DFV(1.0f, 0.0f)
-#define DF_ZERO  DFV(0.0f, 0.0f)
+/* ---- constants ----
+ * DF_CONST(d, hi, lo): a df constant given both its exact double expression
+ * and its two-float split. DF_REAL64 keeps the full double (bit-parity with
+ * the original FP64 kernels); the float2 modes take the split. The double
+ * expression is dropped by the preprocessor in float2 modes, so no double
+ * literal ever reaches an FP64-less compiler. NEVER wrap a double-precision
+ * macro (PI, DEG2RAD, ...) in df_f(): that truncates it to one float, which
+ * is a real error (e.g. an fmod by a 2*PI that is wrong by 1.7e-7 puts a
+ * phase error of floor(x/2pi)*1.7e-7 rad in every reduced angle). */
+#ifdef DF_REAL64
+#define DF_CONST(d, hi, lo) ((df)(d))
+#else
+#define DF_CONST(d, hi, lo) DFV(hi, lo)
+#endif
+
+#define DF_2PI   DF_CONST(6.283185307179586,    6.28318548f, -1.748455531e-07f)
+#define DF_PI    DF_CONST(3.141592653589793,    3.14159274f, -8.742277657e-08f)
+#define DF_PIO2  DF_CONST(1.5707963267948966,   1.57079637f, -4.371138829e-08f)
+#define DF_2OPI  DF_CONST(0.6366197723675814,   0.636619747f, 2.568255297e-08f)
+#define DF_LN2   DF_CONST(0.6931471805599453,   0.693147182f, -1.904654212e-09f)
+#define DF_LOG2E DF_CONST(1.4426950408889634,   1.44269502f, 1.925963034e-08f)
+#define DF_HALF  DF_CONST(0.5,  0.5f, 0.0f)
+#define DF_ONE   DF_CONST(1.0,  1.0f, 0.0f)
+#define DF_ZERO  DF_CONST(0.0,  0.0f, 0.0f)
+/* app-level constants the kernels need at full precision */
+#define DF_DEG2RAD DF_CONST(0.017453292519943295, 0.0174532924f, 1.351996015e-10f)
+#define DF_RAD2DEG DF_CONST(57.29577951308232,    57.2957802f, -6.688024428e-07f)
+#define DF_TINY    DF_CONST(1e-8,                 9.99999994e-09f, 6.077470661e-17f)
+#define DF_DEVEPS  DF_CONST(1e-10,                1.00000001e-10f, -1.335143231e-18f)
 
 #define DF_S3 DFV(-0.166666672f, 4.967053879e-09f)
 #define DF_S5 DFV(0.00833333377f, -4.346172033e-10f)

@@ -2,33 +2,37 @@
 
 - `ocl_fp64_baseline.out` — 182-line reference output for the standard test WU
   (`/home/ian/builds/AST/period_search_out_win/period_search_in`, period range
-  10.697377–10.9), produced by the FP64 CPU build.
+  10.697377–10.9). Identical to `~/builds/AST/ocl_goldens/golden_rank8_182.txt`;
+  independent FP64 implementations (stock CUDA, rank8 CUDA, Windows CUDA on an
+  RTX 3080 Ti, the pre-port OpenCL FP64 kernels on the RX 6800 XT) reproduce it
+  to exact print on the pole columns and to the last digit or so elsewhere.
 - `ps_validate.cpp` — standalone harness wrapping the *exact* upstream
   Asteroids@Home validator logic (`period_search_validator4.cpp`): symmetric
   relative tolerance per line on period (0.1), rms (0.1) and chisq (0.5);
   pole columns are ignored by the project validator.
+- `cmp_poles.py` — column-by-column comparison (exact-print agreement plus
+  lambda/beta winner flips >5°); `-v` lists the flipped lines.
 
 Build and use:
 
 ```
 g++ -O2 -o ps_validate ps_validate.cpp
 ./ps_validate <result_file> <reference_file>
+python3 cmp_poles.py <result_file> <reference_file> [-v]
 ```
 
-Status (2026-07-14, RX 6800 XT / gfx1030):
+Status (2026-07-14, RX 6800 XT / gfx1030, after the df_f-truncation fix —
+see `POLE_AUDIT.md`):
 
-| build                        | verdict | worst margins (allowed 0.1 / 0.1 / 0.5)     |
-|------------------------------|---------|---------------------------------------------|
-| FP32 (df64, default `make`)  | VALID   | per 2.25e-05, rms 2.54e-03, chisq 5.09e-03  |
-| `-DPS_HYBRID` diagnostic     | VALID   | per 2.21e-05, rms 2.55e-03, chisq 5.09e-03  |
-| `-DPS_REAL64` diagnostic     | VALID   | per 3.05e-05, rms 4.16e-03, chisq 8.33e-03  |
+| build                        | verdict | worst margins (allowed 0.1 / 0.1 / 0.5)    | λ/β flips >5° |
+|------------------------------|---------|--------------------------------------------|---------------|
+| FP32 (df64, default `make`)  | VALID   | per 1.34e-05, rms 1.57e-03, chisq 3.14e-03 | 11 / 9        |
+| `-DPS_HYBRID` diagnostic     | VALID   | per 2.52e-05, rms 8.47e-04, chisq 1.69e-03 | 10 / 11       |
+| `-DPS_REAL64` diagnostic     | VALID   | per 2.33e-10, rms 0,       chisq 4.69e-08  | 0 / 0         |
 
-Pole columns (dark/lambda/beta) are NOT validator-checked and do NOT all match
-the FP64 result — see `POLE_AUDIT.md` for the full analysis. Exact-print
-agreement is dark 102/181, lambda 77/182, beta 65/182; ~43 lines have lambda
-and ~40 have beta off by >5° (a different pole won that line). The audit shows
-this is objective-landscape bistability, not a df64 arithmetic defect (the
-pure-double HYBRID build flips basins vs the double oracle at the same rate),
-but it is a real open item: the per-pole `dev` gap (~0.4% median) has to close
-before columns 4-6 line up with FP64. The global best line does match: line 51,
-per 10.75313 vs 10.75309, pole 265/-36 vs 268/-35.
+REAL64 now matches the FP64 pole columns **exactly** (182/182 on dark, lambda
+and beta; byte-identical to a pristine-kernel run). FP32 matches lambda on
+171/182 lines within 5°; the 11 residual flips are near-ties re-broken at the
+float2 storage precision (HYBRID, with exact double arithmetic, flips at the
+same rate) — analysis in `POLE_AUDIT.md`. The global best line matches
+exactly: line 51, `10.75308538 (268,-35)` in both FP32 and the baseline.
