@@ -64,7 +64,8 @@ __kernel void ClCalculatePrepare(
     (*CUDA_LFR).dark_best = df_f(0.0f);
     (*CUDA_LFR).la_best = df_f(0.0f);
     (*CUDA_LFR).be_best = df_f(0.0f);
-    (*CUDA_LFR).dev_best = df_f(1e40f);
+    /* no-result-yet sentinel; 1e30f stays finite in float (1e40f would be inf) */
+    (*CUDA_LFR).dev_best = df_f(1e30f);
 
     //printf("n: %4d, CUDA_CC[%3d].freq: %10.7f, CUDA_FR[%3d].la_best: %10.7f, isInvalid: %4d \n", n, x, (*CUDA_LCC).freq, x, (*CUDA_LFR).la_best, (*CUDA_LCC).isInvalid);
 
@@ -188,7 +189,7 @@ __kernel void ClCalculatePreparePole(
     (*CUDA_LCC).rchisq = df_i(-1);
     (*CUDA_LCC).Alamda = df_i(-1);
     (*CUDA_LCC).Niter = 0;
-    (*CUDA_LCC).iter_diff = df_f(1e40f);
+    (*CUDA_LCC).iter_diff = df_f(1e30f);  /* float-finite sentinel (1e40f = inf) */
     (*CUDA_LCC).dev_old = df_f(1e30f);
     (*CUDA_LCC).dev_new = DF_ZERO;
     //	(*CUDA_LCC).Lastcall=0; always ==0

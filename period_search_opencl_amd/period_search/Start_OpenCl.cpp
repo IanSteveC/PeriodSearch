@@ -568,11 +568,23 @@ cl_int ClPrepare(cl_int deviceId, cl_double* beta_pole, cl_double* lambda_pole, 
         || string(deviceExtensions).find("cl_amd_fp64") != std::string::npos;
 
     bool doesNotSupportsFp64 = !isFp64;
+#if defined(PS_REAL64) || defined(PS_HYBRID)
+    fprintf(stderr, "Precision: FP64 (native double kernels).\n");
+    if (doesNotSupportsFp64)
+    {
+        fprintf(stderr, "Error: this FP64 build requires hardware double support "
+            "(cl_khr_fp64 / cl_amd_fp64), which this device does not report. "
+            "Use the FP32 (df64) build instead: make FP32=1\n");
+        return (1);
+    }
+#else
+    fprintf(stderr, "Precision: FP32 (df64 double-float emulation).\n");
     if (doesNotSupportsFp64)
     {
         // FP32 df64-emulated build does NOT require hardware FP64 — this is the point.
-        fprintf(stderr, "Note: device lacks hardware FP64; running FP32 df64-emulated build.\n");
+        fprintf(stderr, "Note: device lacks hardware FP64; df64 emulation needs none.\n");
     }
+#endif
 
     auto SMXBlock = 32;
     //CUDA_grid_dim = msCount * SMXBlock; //  24 * 32

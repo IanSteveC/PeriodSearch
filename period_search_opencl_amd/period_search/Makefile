@@ -23,6 +23,23 @@ OBJ_DIR =build/Release
 
 # END DO-NOT-CHANGE
 
+# Precision toggle (mirrors the CUDA/HIP apps): the default build is FP64
+# (native double kernels, results identical to the reference implementations;
+# needs cl_khr_fp64/cl_amd_fp64). `make FP32=1` opts into the df64
+# double-float build for devices WITHOUT hardware FP64 — see FP32_HANDOFF.md
+# for its accuracy envelope. Diagnostic modes passed via CPPFLAGS
+# (-DPS_HYBRID, -DPS_DF_DEBUG [FP32+dumps], explicit -DPS_REAL64) suppress
+# the default so they keep meaning what they say.
+# NOTE: make cannot see flag changes — rm -f build/Release/Start_OpenCl.o
+# when switching precision or diagnostic modes.
+ifeq ($(FP32),1)
+PRECISION_FLAGS =
+else ifneq ($(findstring PS_,$(CPPFLAGS)),)
+PRECISION_FLAGS =
+else
+PRECISION_FLAGS = -DPS_REAL64
+endif
+
 # CXXFLAGS = -g -O3 .
 CXXFLAGS = -O2 -w -s -std=c++17 -m64 -fstack-protector-strong -fstack-clash-protection -ffunction-sections \
 	-DNDEBUG \
@@ -107,4 +124,4 @@ $(EXECUTABLE_FILES): period_search_BOINC.cpp  $(OBJECT_FILES) $(OBJ_DIR)/libstdc
 $(OBJ_DIR)/%.o: %.cpp
 	@echo Compiling $<
 	@mkdir -p $(dir $@)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(PRECISION_FLAGS) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
