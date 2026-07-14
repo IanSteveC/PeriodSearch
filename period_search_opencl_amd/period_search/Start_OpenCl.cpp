@@ -2632,6 +2632,14 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
         auto res = new freq_result[CUDA_grid_dim];
         memcpy(res, pfr, frSize);
 #endif
+#ifdef PS_DF_DEBUG
+        /* full per-pole table: every (frequency, pole-start) pair's converged
+           result, before the best-of-poles merge picks a winner */
+        for (int b = 0; b < (int)CUDA_grid_dim; b++)
+            fprintf(stderr, "[pole n=%d b=%d] per=%.9g dev=%.9g x2=%.9g dark=%.6g la=%.6g be=%.6g isRep=%d\n",
+                n, b, res[b].per_best, res[b].dev_best, res[b].dev_best_x2,
+                res[b].dark_best, res[b].la_best, res[b].be_best, res[b].isReported);
+#endif
         for (m = 0; m < (int)(CUDA_grid_dim / N_POLES); m++)
         {
             /* one output line per frequency: pick the best pole, i.e. the
