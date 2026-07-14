@@ -24,9 +24,26 @@
 #ifdef DF_LINT
 typedef struct { float x, y; } df;
 #define DFV(a,b) ((df){a,b})
+#elif defined(DF_REAL64)
+#pragma OPENCL EXTENSION cl_khr_fp64 : enable
+typedef double df;
+#define DFV(a,b) ((double)(a))
+#elif defined(DF_HYBRID)
+/* diagnostic: float2 STORAGE (46-bit), but every op computed in native double.
+   Isolates float-float arithmetic bugs from 46-bit storage insufficiency. */
+#pragma OPENCL EXTENSION cl_khr_fp64 : enable
+typedef float2 df;
+#define DFV(a,b) ((float2)(a,b))
 #else
 typedef float2 df;
 #define DFV(a,b) ((float2)(a,b))
+#endif
+
+/* diagnostic: extract the leading float of a df, in either backing mode */
+#ifdef DF_REAL64
+#define DF_HI(a) ((float)(a))
+#else
+#define DF_HI(a) ((a).x)
 #endif
 
 /* ---- constants (two-float splits; see gen script) ---- */
@@ -79,6 +96,72 @@ typedef float2 df;
 #define DF_A9 DFV(0.030381944f, 4.139211474e-10f)
 
 /* ---- constructors ---- */
+#ifdef DF_HYBRID
+/* float2 storage, double compute */
+static inline double _dfd(df a){ return (double)a.x + (double)a.y; }
+static inline df _dfs(double v){ float hi=(float)v; return (float2)(hi,(float)(v-(double)hi)); }
+static inline df df_f(float a){ return (float2)(a,0.0f); }
+static inline df df_i(int a){ return _dfs((double)a); }
+static inline df df_add(df a, df b){ return _dfs(_dfd(a)+_dfd(b)); }
+static inline df df_sub(df a, df b){ return _dfs(_dfd(a)-_dfd(b)); }
+static inline df df_neg(df a){ return (float2)(-a.x,-a.y); }
+static inline df df_mul(df a, df b){ return _dfs(_dfd(a)*_dfd(b)); }
+static inline df df_sqr(df a){ double d=_dfd(a); return _dfs(d*d); }
+static inline df df_div(df a, df b){ return _dfs(_dfd(a)/_dfd(b)); }
+static inline df df_rcp(df a){ return _dfs(1.0/_dfd(a)); }
+static inline int df_lt(df a, df b){ return _dfd(a) <  _dfd(b); }
+static inline int df_gt(df a, df b){ return _dfd(a) >  _dfd(b); }
+static inline int df_le(df a, df b){ return _dfd(a) <= _dfd(b); }
+static inline int df_ge(df a, df b){ return _dfd(a) >= _dfd(b); }
+static inline int df_eq(df a, df b){ return _dfd(a) == _dfd(b); }
+static inline df df_fabs(df a){ return _dfs(fabs(_dfd(a))); }
+static inline df df_min(df a, df b){ return _dfs(fmin(_dfd(a),_dfd(b))); }
+static inline df df_max(df a, df b){ return _dfs(fmax(_dfd(a),_dfd(b))); }
+static inline int df_isnan(df a){ return isnan(a.x)||isnan(a.y); }
+static inline df df_sqrt(df a){ return _dfs(sqrt(_dfd(a))); }
+static inline df df_rsqrt(df a){ return _dfs(rsqrt(_dfd(a))); }
+static inline df df_exp(df a){ return _dfs(exp(_dfd(a))); }
+static inline df df_log(df a){ return _dfs(log(_dfd(a))); }
+static inline df df_acos(df a){ return _dfs(acos(_dfd(a))); }
+static inline df df_asin_small(df a){ return _dfs(asin(_dfd(a))); }
+static inline df df_fmod(df a, df b){ return _dfs(fmod(_dfd(a),_dfd(b))); }
+static inline df df_round(df a){ return _dfs(round(_dfd(a))); }
+static inline df df_trunc(df a){ return _dfs(trunc(_dfd(a))); }
+static inline df df_ldexp(df a, int e){ return _dfs(ldexp(_dfd(a),e)); }
+static inline void df_sincos(df x, df* s, df* c){ double d=_dfd(x); *s=_dfs(sin(d)); *c=_dfs(cos(d)); }
+#elif defined(DF_REAL64)
+/* isolation build: df == native double, ops are trivial. Runs the exact same
+   converted kernels in true FP64 to separate a port bug from an emulation bug. */
+static inline df df_f(float a) { return (df)a; }
+static inline df df_i(int a)   { return (df)a; }
+static inline df df_add(df a, df b){ return a + b; }
+static inline df df_sub(df a, df b){ return a - b; }
+static inline df df_neg(df a){ return -a; }
+static inline df df_mul(df a, df b){ return a * b; }
+static inline df df_sqr(df a){ return a * a; }
+static inline df df_div(df a, df b){ return a / b; }
+static inline df df_rcp(df a){ return 1.0 / a; }
+static inline int df_lt(df a, df b){ return a <  b; }
+static inline int df_gt(df a, df b){ return a >  b; }
+static inline int df_le(df a, df b){ return a <= b; }
+static inline int df_ge(df a, df b){ return a >= b; }
+static inline int df_eq(df a, df b){ return a == b; }
+static inline df df_fabs(df a){ return fabs(a); }
+static inline df df_min(df a, df b){ return fmin(a, b); }
+static inline df df_max(df a, df b){ return fmax(a, b); }
+static inline int df_isnan(df a){ return isnan(a); }
+static inline df df_sqrt(df a){ return sqrt(a); }
+static inline df df_rsqrt(df a){ return rsqrt(a); }
+static inline df df_exp(df a){ return exp(a); }
+static inline df df_log(df a){ return log(a); }
+static inline df df_acos(df a){ return acos(a); }
+static inline df df_asin_small(df a){ return asin(a); }
+static inline df df_fmod(df a, df b){ return fmod(a, b); }
+static inline df df_round(df a){ return round(a); }
+static inline df df_trunc(df a){ return trunc(a); }
+static inline df df_ldexp(df a, int e){ return ldexp(a, e); }
+static inline void df_sincos(df x, df* s, df* c){ *s = sin(x); *c = cos(x); }
+#else
 static inline df df_f(float a) { return DFV(a, 0.0f); }
 static inline df df_i(int a)   { float h = (float)a; return DFV(h, (float)(a - (int)h)); }
 
@@ -281,7 +364,12 @@ static inline df df_acos(df x) {
     }
     float y0 = acos(x.x);
     df s, c; df_sincos(df_f(y0), &s, &c);
+    /* Newton on cos(y)-x=0: y += (cos y - x)/sin y. Two steps: y0 is only
+       ~2^-24 as an angle, so one step stalls near 2^-27; recompute sin/cos of
+       the improved df angle for the second step to reach ~2^-46. */
     df y = df_add(df_f(y0), df_div(df_sub(c, x), s));
+    df_sincos(y, &s, &c);
+    y = df_add(y, df_div(df_sub(c, x), s));
     return y;
 }
 
@@ -291,5 +379,6 @@ static inline df df_fmod(df a, df b) {
     float n = trunc(q.x);
     return df_sub(a, df_mul(df_f(n), b));
 }
+#endif /* DF_REAL64 else (float-float impl) */
 
 #endif /* DF64_CL */

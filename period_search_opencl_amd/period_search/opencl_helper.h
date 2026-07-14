@@ -131,6 +131,30 @@ cl_int EnqueueNDRangeKernel(cl_command_queue command_queue,
     std::cerr << "Starting kernel [" << kernelName << "]... ";
 #endif
 
+    /* PS_TRACE_SYNC=1: print each kernel name and wait for it to finish so a
+       GPU fault is attributed to the right kernel (debug aid, off by default) */
+    static int psTraceSync = -1;
+    if (psTraceSync < 0)
+    {
+        const char* e = getenv("PS_TRACE_SYNC");
+        psTraceSync = (e && *e && *e != '0') ? 1 : 0;
+    }
+    if (psTraceSync)
+    {
+        size_t nameSize;
+        clGetKernelInfo(kernel, CL_KERNEL_FUNCTION_NAME, 0, NULL, &nameSize);
+        auto traceName = new char[nameSize];
+        clGetKernelInfo(kernel, CL_KERNEL_FUNCTION_NAME, nameSize, traceName, NULL);
+        fprintf(stderr, "[trace] %s g=%zu l=%zu ...", traceName, global_work_size[0], local_work_size ? local_work_size[0] : 0);
+        fflush(stderr);
+        cl_int err2 = clEnqueueNDRangeKernel(command_queue, kernel, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event);
+        cl_int fin = (err2 == CL_SUCCESS) ? clFinish(command_queue) : err2;
+        fprintf(stderr, " enq=%d fin=%d\n", err2, fin);
+        fflush(stderr);
+        delete[] traceName;
+        return err2 != CL_SUCCESS;
+    }
+
     cl_int err = clEnqueueNDRangeKernel(command_queue, kernel, work_dim, global_work_offset, global_work_size, local_work_size, num_events_in_wait_list, event_wait_list, event);
     if (err != CL_SUCCESS)
     {

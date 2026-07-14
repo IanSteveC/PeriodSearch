@@ -63,7 +63,82 @@ typedef unsigned int uint;
 
 #include "Globals_OpenCl.h"
 #include <cstddef>
+#include <cstdlib>
 #include <numeric>
+
+// ================= FP32 df64 host<->device packing =====================
+// On the device every former `double` is a `df` = float2 {hi,lo} (float-float,
+// ~46-bit mantissa). double and float2 are both 8 bytes, so struct byte layouts
+// match; only the ENCODING of each 8-byte slot differs. Invariant: the host
+// always holds plain double, the device always holds df — so we PACK on every
+// upload and UNPACK on every readback. Each struct here is a contiguous
+// double-block followed by an int-block; we convert the double prefix and leave
+// the int tail verbatim (a flat double array = prefix == whole element).
+static inline void psPackPrefix(void* p, size_t prefixBytes)
+{
+    size_t n = prefixBytes / sizeof(double);
+    double* s = static_cast<double*>(p);
+    cl_float2* d = static_cast<cl_float2*>(p);
+    for (size_t i = 0; i < n; i++) {
+        double v = s[i];
+        cl_float2 o;
+        /* Uninitialized host struct fields hold garbage doubles; a huge/inf/nan
+           one casts to inf/nan in float and, unlike a finite garbage double,
+           propagates toxically through df ops. Real app data is well within
+           float range, so clamp the un-representable to zero. */
+        if (!std::isfinite(v) || v > 3.0e38 || v < -3.0e38) { o.s[0] = 0.0f; o.s[1] = 0.0f; }
+        else { float hi = (float)v; o.s[0] = hi; o.s[1] = (float)(v - (double)hi); }
+        d[i] = o;
+    }
+}
+static inline void psUnpackPrefix(void* p, size_t prefixBytes)
+{
+    size_t n = prefixBytes / sizeof(double);
+    cl_float2* s = static_cast<cl_float2*>(p);
+    double* d = static_cast<double*>(p);
+    for (size_t i = 0; i < n; i++) { cl_float2 v = s[i]; d[i] = (double)v.s[0] + (double)v.s[1]; }
+}
+// pack a host buffer of `elemBytes`-strided elements (double-prefix `prefixBytes`) and upload
+static inline cl_int psPackWrite(cl_command_queue q, cl_mem buf, const void* host,
+                                 size_t totalBytes, size_t elemBytes, size_t prefixBytes)
+{
+#ifdef PS_REAL64
+    return clEnqueueWriteBuffer(q, buf, CL_BLOCKING, 0, totalBytes, host, 0, NULL, NULL);
+#endif
+    char* tmp = static_cast<char*>(malloc(totalBytes));
+    memcpy(tmp, host, totalBytes);
+    for (size_t off = 0; off + elemBytes <= totalBytes; off += elemBytes) psPackPrefix(tmp + off, prefixBytes);
+    cl_int e = clEnqueueWriteBuffer(q, buf, CL_BLOCKING, 0, totalBytes, tmp, 0, NULL, NULL);
+    free(tmp);
+    return e;
+}
+// read device buffer back into host and unpack every element's df prefix to double
+static inline cl_int psReadUnpack(cl_command_queue q, cl_mem buf, void* host,
+                                  size_t totalBytes, size_t elemBytes, size_t prefixBytes)
+{
+    cl_int e = clEnqueueReadBuffer(q, buf, CL_BLOCKING, 0, totalBytes, host, 0, NULL, NULL);
+#ifdef PS_REAL64
+    return e;
+#endif
+    char* h = static_cast<char*>(host);
+    for (size_t off = 0; off + elemBytes <= totalBytes; off += elemBytes) psUnpackPrefix(h + off, prefixBytes);
+    return e;
+}
+// set a scalar df kernel argument: the kernel param is a df (float2 in FP32),
+// so a raw host double must be packed to {hi,lo} floats first.
+static inline cl_int psSetArgDf(cl_kernel k, cl_uint idx, double v)
+{
+#ifdef PS_REAL64
+    return clSetKernelArg(k, idx, sizeof(double), &v);
+#else
+    cl_float2 d; float hi = (float)v; d.s[0] = hi; d.s[1] = (float)(v - (double)hi);
+    return clSetKernelArg(k, idx, sizeof(cl_float2), &d);
+#endif
+}
+#define PS_MFC_PREFIX offsetof(mfreq_context, Niter)
+#define PS_FC_PREFIX  offsetof(freq_context, ia)
+#define PS_FR_PREFIX  offsetof(freq_result, isReported)
+// =======================================================================
 
 //using namespace std;
 using std::cout;
@@ -429,8 +504,8 @@ cl_int ClPrepare(cl_int deviceId, cl_double* beta_pole, cl_double* lambda_pole, 
     bool doesNotSupportsFp64 = !isFp64;
     if (doesNotSupportsFp64)
     {
-        fprintf(stderr, "Double precision floating point not supported by OpenCL implementation on current device. Exiting...\n");
-        return (1);
+        // FP32 df64-emulated build does NOT require hardware FP64 — this is the point.
+        fprintf(stderr, "Note: device lacks hardware FP64; running FP32 df64-emulated build.\n");
     }
 
     auto SMXBlock = 32;
@@ -567,7 +642,13 @@ cl_int ClPrepare(cl_int deviceId, cl_double* beta_pole, cl_double* lambda_pole, 
         }
 
         //char options[]{ "-Werror" };
-        char options[]{ "-w" };
+        #ifdef PS_REAL64
+        char options[]{ "-w -D PS_FP32_OCL -D DF_REAL64 -cl-std=CL1.2" };
+#elif defined(PS_HYBRID)
+        char options[]{ "-w -D PS_FP32_OCL -D DF_HYBRID -cl-std=CL1.2" };
+#else
+        char options[]{ "-w -D PS_FP32_OCL -cl-std=CL1.2" };
+#endif
 #if defined (AMD)
         err_num = clBuildProgram(binProgram, 1, &device, options, NULL, NULL); // "-Werror -cl-std=CL1.1"
 #elif defined (NVIDIA)
@@ -647,7 +728,13 @@ cl_int ClPrepare(cl_int deviceId, cl_double* beta_pole, cl_double* lambda_pole, 
         program = clCreateProgramWithBinary(context, 1, &device, &binary_size, (const unsigned char**)&binary, &binary_status, &err_num);
 
         //char options[]{ "-Werror" };
-        char options[]{ "-w" };
+        #ifdef PS_REAL64
+        char options[]{ "-w -D PS_FP32_OCL -D DF_REAL64 -cl-std=CL1.2" };
+#elif defined(PS_HYBRID)
+        char options[]{ "-w -D PS_FP32_OCL -D DF_HYBRID -cl-std=CL1.2" };
+#else
+        char options[]{ "-w -D PS_FP32_OCL -cl-std=CL1.2" };
+#endif
 #if defined (AMD)
         err_num = clBuildProgram(program, 1, &device, options, NULL, NULL); // "-Werror -cl-std=CL1.1" "-g -x cl -cl-std=CL1.2 -Werror"
 #elif defined (NVIDIA)
@@ -1055,7 +1142,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
      //queue.enqueueWriteBuffer(cgFirst, CL_TRUE, 0, sizeof(double) * (MAX_N_PAR + 1), cg_first);
 
     cl_mem cgFirst = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_double) * (MAX_N_PAR + 1), cg_first, &err);
-    clEnqueueWriteBuffer(queue, cgFirst, CL_BLOCKING, 0, sizeof(cl_double)* (MAX_N_PAR + 1), cg_first, 0, NULL, NULL);
+    psPackWrite(queue, cgFirst, cg_first, sizeof(cl_double) * (MAX_N_PAR + 1), sizeof(double), sizeof(double));
 
     //cl_mem cgFirst = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, sizeof(cl_double) * (MAX_N_PAR + 1), cg_first, &err);
 #endif
@@ -1085,6 +1172,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
     // auto pcc = new mfreq_context[CUDA_grid_dim_precalc];
     auto pccSize = ((sizeof(mfreq_context) * CUDA_grid_dim_precalc) / 128 + 1) * 128;
     auto pcc = (mfreq_context*)aligned_alloc(128, pccSize);
+    memset(pcc, 0, pccSize);   /* FP32: pack() turns uninitialized garbage doubles into toxic inf/nan floats; zero first */
 
     // auto pcc = queue.enqueueMapBuffer(CUDA_MCC2, CL_BLOCKING, CL_MAP_READ | CL_MAP_WRITE, 0, pccSize, NULL, NULL, err);
     // queue.flush();
@@ -1151,7 +1239,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
 #elif defined AMD
     // queue.enqueueWriteBuffer(CUDA_MCC2, CL_BLOCKING, 0, optimizedSize, pcc);
     // queue.enqueueWriteBuffer(CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc);
-    // err = clEnqueueWriteBuffer(queue, CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc, 0, NULL, NULL);
+    // err = psPackWrite(queue, CUDA_MCC2, pcc, pccSize, sizeof(mfreq_context), PS_MFC_PREFIX);
     // queue.enqueueUnmapMemObject(CUDA_MCC2, pcc);
     // queue.flush();
 
@@ -1169,7 +1257,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
         clFinish(queue);
     }
 
-    clEnqueueWriteBuffer(queue, CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc, 0, NULL, NULL);
+    psPackWrite(queue, CUDA_MCC2, pcc, pccSize, sizeof(mfreq_context), PS_MFC_PREFIX);
 #elif defined NVIDIA
     queue.enqueueWriteBuffer(CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc);
 #endif
@@ -1195,7 +1283,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
     // clFlush(queue);
     auto pFa = (freq_context*)aligned_alloc(128, faSize);
     cl_mem CUDA_CC = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, faSize, pFa, &err);
-    clEnqueueWriteBuffer(queue, CUDA_CC, CL_BLOCKING, 0, faSize, Fa, 0, NULL, NULL);
+    psPackWrite(queue, CUDA_CC, Fa, faSize, sizeof(freq_context), PS_FC_PREFIX);
 
 #endif
 #else // WIN32
@@ -1211,7 +1299,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
     auto pFa = (freq_context*)_aligned_malloc(faSize, 128);
     //memcpy(pFa, Fa, faSize);
     cl_mem CUDA_CC = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, faSize, pFa, &err);
-    clEnqueueWriteBuffer(queue, CUDA_CC, CL_BLOCKING, 0, faSize, Fa, 0, NULL, NULL);
+    psPackWrite(queue, CUDA_CC, Fa, faSize, sizeof(freq_context), PS_FC_PREFIX);
 #endif
 #endif
 
@@ -1287,6 +1375,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
     cl_uint frSize = (sizeof(freq_result) * CUDA_grid_dim_precalc / 128 + 1) * 128;
     // auto pfr = new freq_result[CUDA_grid_dim_precalc];
     auto pfr = (freq_result*)aligned_alloc(128, frSize);
+    memset(pfr, 0, frSize);   /* FP32: avoid packing uninitialized garbage into inf/nan */
     cl_mem CUDA_FR = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, frSize, pfr, &err);
     // void *pfr;
 #elif NVIDIA
@@ -1323,8 +1412,8 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
     err = clSetKernelArg(kernelCalculatePrepare, 0, sizeof(cl_mem), &CUDA_MCC2);
     err = clSetKernelArg(kernelCalculatePrepare, 1, sizeof(cl_mem), &CUDA_FR);
     err = clSetKernelArg(kernelCalculatePrepare, 2, sizeof(cl_mem), &CUDA_End);
-    err = clSetKernelArg(kernelCalculatePrepare, 3, sizeof(freq_start), &freq_start);
-    err = clSetKernelArg(kernelCalculatePrepare, 4, sizeof(freq_step), &freq_step);
+    err = psSetArgDf(kernelCalculatePrepare, 3, freq_start);
+    err = psSetArgDf(kernelCalculatePrepare, 4, freq_step);
     err = clSetKernelArg(kernelCalculatePrepare, 5, sizeof(max_test_periods), &max_test_periods);
 
     err = clSetKernelArg(kernelCalculatePreparePole, 0, sizeof(cl_mem), &CUDA_MCC2);
@@ -1341,8 +1430,8 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
     err = clSetKernelArg(kernelCalculateIter1Begin, 2, sizeof(cl_mem), &CUDA_End);
     err = clSetKernelArg(kernelCalculateIter1Begin, 3, sizeof(int), &n_iter_min);
     err = clSetKernelArg(kernelCalculateIter1Begin, 4, sizeof(int), &n_iter_max);
-    err = clSetKernelArg(kernelCalculateIter1Begin, 5, sizeof(double), &iter_diff_max);
-    err = clSetKernelArg(kernelCalculateIter1Begin, 6, sizeof(double), &((*Fa).Alamda_start));
+    err = psSetArgDf(kernelCalculateIter1Begin, 5, iter_diff_max);
+    err = psSetArgDf(kernelCalculateIter1Begin, 6, (*Fa).Alamda_start);
 
     err = clSetKernelArg(kernelCalculateIter1Mrqcof1Start, 0, sizeof(cl_mem), &CUDA_MCC2);
     err = clSetKernelArg(kernelCalculateIter1Mrqcof1Start, 1, sizeof(cl_mem), &CUDA_CC);
@@ -1458,7 +1547,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
 #if defined INTEL
         queue.enqueueWriteBuffer(CUDA_FR, CL_BLOCKING, 0, frOptimizedSize, pfr);
 #elif AMD
-        clEnqueueWriteBuffer(queue, CUDA_FR, CL_BLOCKING, 0, frSize, pfr, 0, NULL, NULL);
+        psPackWrite(queue, CUDA_FR, pfr, frSize, sizeof(freq_result), PS_FR_PREFIX);
 #elif NVIDIA
         queue.enqueueUnmapMemObject(CUDA_FR, pfr);
         queue.flush();
@@ -1487,7 +1576,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
                 }
             }
 
-            clEnqueueReadBuffer(queue, CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc, 0, NULL, NULL);
+            psReadUnpack(queue, CUDA_MCC2, pcc, pccSize, sizeof(mfreq_context), PS_MFC_PREFIX);
             //pcc = clEnqueueMapBuffer(queue, CUDA_MCC2, CL_BLOCKING, CL_MAP_READ, 0, pccSize, 0, NULL, NULL, &err);
             //clFlush(queue);
             int errCnt = 0;
@@ -1635,7 +1724,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
         // pfr = clEnqueueMapBuffer(queue, CUDA_FR, CL_BLOCKING, CL_MAP_READ, 0, frSize, 0, NULL, NULL, &err);
         //queue.flush(); // ***
         // queue.enqueueReadBuffer(CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc);
-        clEnqueueReadBuffer(queue, CUDA_FR, CL_BLOCKING, 0, frSize, pfr, 0, NULL, NULL);
+        psReadUnpack(queue, CUDA_FR, pfr, frSize, sizeof(freq_result), PS_FR_PREFIX);
 #elif NVIDIA
         pfr = queue.enqueueMapBuffer(CUDA_FR, CL_BLOCKING, CL_MAP_READ | CL_MAP_WRITE, 0, frSize, NULL, NULL, err);
         queue.flush();
@@ -1645,7 +1734,7 @@ cl_int ClPrecalc(cl_double freq_start, cl_double freq_end, cl_double freq_step, 
         fres = (freq_result*)queue.enqueueMapBuffer(CUDA_FR, CL_BLOCKING, CL_MAP_READ, 0, frOptimizedSize, NULL, NULL, err);
         queue.finish();
 #elif AMD
-        clEnqueueReadBuffer(queue, CUDA_FR, CL_BLOCKING, 0, frSize, pfr, 0, NULL, NULL);
+        psReadUnpack(queue, CUDA_FR, pfr, frSize, sizeof(freq_result), PS_FR_PREFIX);
 #elif NVIDIA
         pfr = queue.enqueueMapBuffer(CUDA_FR, CL_BLOCKING, CL_MAP_READ | CL_MAP_WRITE, 0, frSize, NULL, NULL, err);
         queue.flush();
@@ -2017,14 +2106,14 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
 #else
     // queue.enqueueWriteBuffer(CUDA_MCC2, CL_BLOCKING, 0, optimizedSize, pcc);
     cl_mem CUDA_MCC2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, pccSize, pcc, &err);
-    clEnqueueWriteBuffer(queue, CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc, 0, NULL, NULL);
+    psPackWrite(queue, CUDA_MCC2, pcc, pccSize, sizeof(mfreq_context), PS_MFC_PREFIX);
 #endif
 #else // WIN32
 #if defined (INTEL)
     queue.enqueueWriteBuffer(CUDA_MCC2, CL_BLOCKING, 0, optimizedSize, pcc);
 #else
     cl_mem CUDA_MCC2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, pccSize, pcc, &err);
-    clEnqueueWriteBuffer(queue, CUDA_MCC2, CL_BLOCKING, 0, pccSize, pcc, 0, NULL, NULL);
+    psPackWrite(queue, CUDA_MCC2, pcc, pccSize, sizeof(mfreq_context), PS_MFC_PREFIX);
 
     //clEnqueueUnmapMemObject(queue, CUDA_MCC2, pcc, 0, NULL, NULL);
     //clFlush(queue);
@@ -2163,8 +2252,8 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
     err = clSetKernelArg(kernelCalculatePrepare, 0, sizeof(cl_mem), &CUDA_MCC2);
     err = clSetKernelArg(kernelCalculatePrepare, 1, sizeof(cl_mem), &CUDA_FR);
     err = clSetKernelArg(kernelCalculatePrepare, 2, sizeof(cl_mem), &CUDA_End);
-    err = clSetKernelArg(kernelCalculatePrepare, 3, sizeof(freq_start), &freq_start);
-    err = clSetKernelArg(kernelCalculatePrepare, 4, sizeof(freq_step), &freq_step);
+    err = psSetArgDf(kernelCalculatePrepare, 3, freq_start);
+    err = psSetArgDf(kernelCalculatePrepare, 4, freq_step);
     err = clSetKernelArg(kernelCalculatePrepare, 5, sizeof(n_max), &n_max);
 
     err = clSetKernelArg(kernelCalculatePreparePole, 0, sizeof(cl_mem), &CUDA_MCC2);
@@ -2181,8 +2270,8 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
     err = clSetKernelArg(kernelCalculateIter1Begin, 2, sizeof(cl_mem), &CUDA_End);
     err = clSetKernelArg(kernelCalculateIter1Begin, 3, sizeof(int), &n_iter_min);
     err = clSetKernelArg(kernelCalculateIter1Begin, 4, sizeof(int), &n_iter_max);
-    err = clSetKernelArg(kernelCalculateIter1Begin, 5, sizeof(double), &iter_diff_max);
-    err = clSetKernelArg(kernelCalculateIter1Begin, 6, sizeof(double), &((*Fa).Alamda_start));
+    err = psSetArgDf(kernelCalculateIter1Begin, 5, iter_diff_max);
+    err = psSetArgDf(kernelCalculateIter1Begin, 6, (*Fa).Alamda_start);
 
     err = clSetKernelArg(kernelCalculateIter1Mrqcof1Start, 0, sizeof(cl_mem), &CUDA_MCC2);
     err = clSetKernelArg(kernelCalculateIter1Mrqcof1Start, 1, sizeof(cl_mem), &CUDA_CC);
@@ -2301,7 +2390,7 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
 #else
         // queue.enqueueUnmapMemObject(CUDA_FR, pfr);
         // queue.flush();
-        clEnqueueWriteBuffer(queue, CUDA_FR, CL_BLOCKING, 0, frSize, pfr, 0, NULL, NULL);
+        psPackWrite(queue, CUDA_FR, pfr, frSize, sizeof(freq_result), PS_FR_PREFIX);
 #endif
         err = clSetKernelArg(kernelCalculatePrepare, 6, sizeof(n), &n);
         err = EnqueueNDRangeKernel(queue, kernelCalculatePrepare, 1, NULL, &CUDA_grid_dim, &sLocal, 0, NULL, NULL);
@@ -2452,7 +2541,7 @@ int ClStart(int n_start_from, double freq_start, double freq_end, double freq_st
 #else
         // pfr = queue.enqueueMapBuffer(CUDA_FR, CL_BLOCKING, CL_MAP_READ | CL_MAP_WRITE, 0, frSize, NULL, NULL, err);
         // queue.flush();
-        clEnqueueReadBuffer(queue, CUDA_FR, CL_BLOCKING, 0, frSize, pfr, 0, NULL, NULL);
+        psReadUnpack(queue, CUDA_FR, pfr, frSize, sizeof(freq_result), PS_FR_PREFIX);
 #endif
         //err=cudaThreadSynchronize(); memcpy is synchro itself
 
