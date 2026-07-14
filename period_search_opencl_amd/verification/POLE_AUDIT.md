@@ -112,3 +112,32 @@ rm -f kernels.bin period_search_state period_search_out boinc_lockfile kernelSou
 grep '^\[pole' stderr.txt > poles.txt   # b -> freq line = b/10, pole = b%10
 python3 verification/cmp_poles.py period_search_out verification/ocl_fp64_baseline.out -v
 ```
+
+## Addendum (2026-07-14, later): the triple-float experiments — accuracy is not bit-reproducibility
+
+Two further builds settle what the residual float-only flips are:
+
+- **`PS_TRIPLE_HYBRID`** — df = {float x,y,z} (~71-bit storage), all ops in
+  native double; the ONLY variable vs `PS_HYBRID` is storage width. Result:
+  **byte-identical to the FP64 build** (three floats hold any binary64
+  exactly, and the double ops are bit-identical). This proved the df64 flips
+  were storage rounding and nothing else.
+- **`DF_TRIPLE`** — float-only triple-float arithmetic, per-op ~2^-63
+  (differential harness `tools/test_triple.cpp`: add/sub exact, mul/div/
+  sqrt/exp/acos ~2^-63, sincos ~2^-64, log ~2^-59). Same-basin per-pole dev
+  gap vs FP64 improves 100x over df64 (median 1.2e-6 vs 1.3e-4) — but the
+  basin-flip rate is unchanged (2249/2300 = 97.8% same basin vs df64's
+  97.3%), and the output still flips 10-11 near-tie winners.
+
+Interpretation: the basin each (freq,pole) trial falls into during the
+50-iteration LM transient is chaotically sensitive to ANY *dense* per-op
+deviation from binary64's exact rounding, no matter how small — a system
+1000x MORE accurate than double still decorrelates ~2% of trials, because
+its results land on a different rounding grid at every operation. Native
+FP64 implementations agree with each other only because IEEE add/mul are
+bit-deterministic (identical inputs -> identical bits, i.e. zero deviation
+at almost every op; vendor libm differences are sparse). Exact pole parity
+without FP64 hardware therefore requires bit-exact software binary64
+emulation, not higher precision. The triple build is still the better FP32
+app: every accuracy metric (validator margins, exact prints, per-pole dev
+agreement) improves substantially over df64, at 1.8x its runtime.

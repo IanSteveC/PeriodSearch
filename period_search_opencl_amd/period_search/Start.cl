@@ -962,3 +962,17 @@ __kernel void ClCalculateFinishPole(
     (*CUDA_LFR).chck[3]=(*CUDA_LCC).chck[3];*/
     barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE);
 }
+
+/* host/device layout handshake: the host packs df slots by its own mirror of
+   these structs, so any disagreement in sizeof would corrupt every buffer.
+   The host reads these and aborts on mismatch (all df modes). */
+__kernel void ClLayoutProbe(__global int* out)
+{
+    if (get_global_id(0) == 0)
+    {
+        out[0] = (int)sizeof(df);
+        out[1] = (int)sizeof(struct mfreq_context);
+        out[2] = (int)sizeof(struct freq_context);
+        out[3] = (int)sizeof(struct freq_result);
+    }
+}

@@ -1,37 +1,56 @@
-# OpenCL FP32 (df64) port — STATUS: done; default build FP64-exact, FP32 opt-in at its noise floor
+# OpenCL FP32 port — STATUS: FP64 default exact; FP32 = triple-float (or df64); parity limit understood
 
-The port (branch `opencl-fp32`) now ships a single codebase with a precision
+The port (branch `opencl-fp32`) ships a single codebase with a precision
 toggle like the CUDA/HIP apps: **default `make` builds the FP64 app** (native
 double kernels, requires cl_khr_fp64/cl_amd_fp64) whose output matches the
 FP64 reference **exactly on every column** (byte-identical to the pre-port
-kernels); **`make FP32=1` opts into the df64 build** for devices without
-hardware FP64. See `verification/README.md` for the matrix and
-`verification/POLE_AUDIT.md` for the full analysis.
+kernels); **`make FP32=1` builds the triple-float app** for devices without
+hardware FP64 (float-only ops, ~2^-63 per-op accuracy); **`make FP32=1
+DF64=1` builds the faster double-float (df64) variant** (~49-bit). See
+`verification/README.md` for the matrix and `verification/POLE_AUDIT.md`
+for the full analysis.
 
 ## Bottom line
 
 - **FP64 (default `make`)**: all columns correct — poles 182/182 exact print,
   validator margins per 2.3e-10 / rms 0 / chisq 4.7e-08. Byte-identical to
   the pristine pre-conversion kernels; hard-errors on FP64-less devices with
-  a pointer to the FP32 build.
-- **FP32 (`make FP32=1`)**: VALID, worst margins per 2.54e-05 (tol 0.1),
-  rms 8.42e-04 (0.1), chisq 1.68e-03 (0.5) — margins now equal HYBRID's,
-  i.e. the emulated arithmetic is at the float2 storage bound. Poles: winner
-  flips >5° on 11 λ / 10 β of 182 lines (43/40 before the constant fix). The
-  global best line — the actual answer — matches exactly: line 51,
-  `10.75308538 (268,-35)`.
-- The residual FP32 flips are the ~49-bit float2 storage noise floor, NOT an
-  arithmetic bug, established by three controls: (1) HYBRID (float2 storage,
-  exact double compute) flips at the same rate; (2) REAL64 (53-bit) flips
-  zero; (3) tightening the weakest df64 ops (df_acos 2^-38→2^-45.5, df_mul
-  cross term) halved the rms/chisq margins but did NOT move the flip count.
-  Per-pole: 97.3% of the 2300 trials land in the same basin as the double
-  oracle; same-basin |Δdev|/dev median 1.3e-4. Exact pole parity on FP64-less
-  devices is NOT reachable inside 2-float storage — it requires wider
-  numerics (triple-float or soft-fp64), which was evaluated and declined for
-  performance (warm-run wall time, RX 6800 XT, standard WU: FP64 13.5 s,
-  FP32 df64 25.8 s already; triple-float would land roughly 2-3x above df64).
-  Users who need exact columns should run the FP64 build.
+  a pointer to the FP32 build. 13.5 s warm on the 6800 XT.
+- **FP32 triple-float (`make FP32=1`)**: VALID with margins per 2.52e-05 /
+  rms 9.59e-04 / chisq 1.92e-03; poles within 5° on ~172/182 lines; the
+  global best line — the actual answer — matches exactly (line 51,
+  `10.75308538 (268,-35)`). Per-op accuracy ~2^-63 (tools/test_triple.cpp),
+  same-basin per-pole dev gap vs FP64 median 1.2e-6 (100x tighter than
+  df64). 45.9 s warm (1.8x df64).
+- **FP32 df64 (`make FP32=1 DF64=1`)**: VALID, poles within 5° on 171/182;
+  same-basin dev gap median 1.3e-4. 25.8 s warm — the throughput option.
+
+## Why ~10 near-tie pole flips remain in ANY float-only build (2026-07-14, final)
+
+Two proof-of-concept experiments settle the mechanism:
+
+1. **`PS_TRIPLE_HYBRID`** (3-float storage, ops in native double — only the
+   storage width differs from `PS_HYBRID`): **byte-identical to the FP64
+   build.** Three floats hold any binary64 exactly, and the double ops are
+   bit-identical, so this proved storage was the df64 limiter — and that no
+   other divergence source exists.
+2. **`DF_TRIPLE`** (float-only, per-op ~2^-63, 1000x more accurate than
+   native double): basin-flip rate vs FP64 stays ~2% (2249/2300 same basin
+   vs df64's 2239/2300), and the output flips 10-11 winners — the same as
+   df64 — even though every accuracy metric improves 30-100x.
+
+Conclusion: the 50-iteration LM basin choice is chaotically sensitive to ANY
+*dense* per-op deviation from binary64's exact rounding — even deviations
+1000x smaller than double's own rounding step. FP64 implementations agree
+with each other not because the problem is robust but because IEEE binary64
+add/mul are bit-deterministic (zero deviation at almost every op; vendor
+libm differences are sparse enough not to trigger it). **Accuracy is not
+bit-reproducibility.** Exact 182/182 pole parity on FP64-less hardware
+therefore requires bit-exact software binary64 emulation (integer softfloat
+core, with transcendentals — e.g. the DF_TRIPLE ones — rounded to the
+double grid), estimated 3-6x the df64 runtime. Not built; the triple build
+is the recommended FP32 app (equally valid physics, tighter dev agreement,
+~6% of near-tie winners re-broken).
 
 ## The 2026-07-14 finding: `df_f()` constant truncation (read this first)
 
@@ -88,10 +107,15 @@ script pattern is in `verification/POLE_AUDIT.md` ("Reproduce").
 ```
 cd period_search
 make                          # DEFAULT: FP64 (native double kernels, exact)
-make FP32=1                   # FP32 (df64) for devices without hardware FP64
+make FP32=1                   # FP32 triple-float (float-only, ~2^-63/op) for
+                              # devices without hardware FP64
+make FP32=1 DF64=1            # FP32 double-float (df64, ~49-bit) — 1.8x faster
 make CPPFLAGS=-DPS_HYBRID     # diagnostic: float2 storage, double compute
-make CPPFLAGS=-DPS_DF_DEBUG   # FP32 + readback dumps incl. the per-(freq,pole)
+make CPPFLAGS=-DPS_TRIPLE_HYBRID  # diagnostic: 3-float storage, double compute
+                              # (byte-identical to FP64; needs fp64; slow)
+make CPPFLAGS=-DPS_DF_DEBUG   # df64 + readback dumps incl. the per-(freq,pole)
                               # freq_result table (grep '^\[pole' stderr.txt);
+                              # FP32=1 CPPFLAGS=-DPS_DF_DEBUG for triple+dumps,
                               # add -DPS_REAL64 for FP64+dumps
                               # (any PS_* in CPPFLAGS suppresses the FP64
                               #  default, so diagnostics keep their meaning;

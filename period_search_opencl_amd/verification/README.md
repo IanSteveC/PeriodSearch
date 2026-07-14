@@ -21,26 +21,27 @@ g++ -O2 -o ps_validate ps_validate.cpp
 python3 cmp_poles.py <result_file> <reference_file> [-v]
 ```
 
-Status (2026-07-14, RX 6800 XT / gfx1030, after the df_f-truncation fix —
-see `POLE_AUDIT.md`; `make` now defaults to FP64, `make FP32=1` opts into
-df64):
+Status (2026-07-14, RX 6800 XT / gfx1030 — see `POLE_AUDIT.md` for the full
+analysis; `make` defaults to FP64, `make FP32=1` builds the triple-float
+FP32 app, `make FP32=1 DF64=1` the faster double-float variant):
 
-| build                        | verdict | worst margins (allowed 0.1 / 0.1 / 0.5)    | λ/β flips >5° |
-|------------------------------|---------|--------------------------------------------|---------------|
-| FP64 (default `make`)        | VALID   | per 2.33e-10, rms 0,       chisq 4.69e-08  | 0 / 0         |
-| FP32 (`make FP32=1`, df64)   | VALID   | per 2.54e-05, rms 8.42e-04, chisq 1.68e-03 | 11 / 10       |
-| `-DPS_HYBRID` diagnostic     | VALID   | per 2.52e-05, rms 8.47e-04, chisq 1.69e-03 | 10 / 11       |
+| build                           | verdict | worst margins (allowed 0.1 / 0.1 / 0.5)    | λ/β flips >5° | warm wall |
+|---------------------------------|---------|--------------------------------------------|---------------|-----------|
+| FP64 (default `make`)           | VALID   | per 2.33e-10, rms 0,       chisq 4.69e-08  | 0 / 0         | 13.5 s    |
+| FP32 triple (`make FP32=1`)     | VALID   | per 2.52e-05, rms 9.59e-04, chisq 1.92e-03 | 10 / 11       | 45.9 s    |
+| FP32 df64 (`… DF64=1`)          | VALID   | per 2.54e-05, rms 8.42e-04, chisq 1.68e-03 | 11 / 10       | 25.8 s    |
+| `-DPS_HYBRID` diagnostic        | VALID   | per 2.52e-05, rms 8.47e-04, chisq 1.69e-03 | 10 / 11       |           |
+| `-DPS_TRIPLE_HYBRID` diagnostic | VALID   | per 2.33e-10, rms 0,       chisq 4.69e-08  | 0 / 0         | 120 s     |
 
-The FP32 margins now equal HYBRID's (float2 storage with *exact* double
-arithmetic) — after the df_acos rewrite and df_mul cross-term fix the emulated
-arithmetic contributes nothing measurable beyond the float2 storage rounding
-itself. Warm-run wall time on the RX 6800 XT, standard WU: FP64 13.5 s,
-FP32 df64 25.8 s.
-
-The FP64 build matches the reference pole columns **exactly** (182/182 on
-dark, lambda and beta; byte-identical to a pristine-kernel run). FP32 matches
-lambda on 171/182 lines within 5°; the 11 residual flips are near-ties
-re-broken at the float2 storage precision (HYBRID, with exact double
-arithmetic, flips at the same rate) — analysis in `POLE_AUDIT.md`. The global
-best line matches exactly: line 51, `10.75308538 (268,-35)` in both FP32 and
-the baseline.
+The FP64 build matches the reference pole columns **exactly** (182/182,
+byte-identical to a pristine-kernel run), as does the TRIPLE_HYBRID
+diagnostic (3-float storage, double compute — byte-identical to the FP64
+build, which proves the storage-width theory). The float-only FP32 builds
+match lambda on ~172/182 lines within 5°; the residual flips are chaotic
+basin near-ties that re-break under ANY dense per-op rounding difference
+from binary64: the triple build's per-op accuracy (~2^-63) beats native
+double 1000x and tightens the same-basin dev gap 100x (median 1.2e-6 vs
+df64's 1.3e-4), yet the basin-flip rate stays ~2% because accuracy is not
+bit-reproducibility. Exact FP32 pole parity would require bit-exact software
+binary64 emulation. The global best line matches exactly in every mode:
+line 51, `10.75308538 (268,-35)`.
