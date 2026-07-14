@@ -23,11 +23,12 @@ Status (2026-07-14, RX 6800 XT / gfx1030):
 | `-DPS_HYBRID` diagnostic     | VALID   | per 2.21e-05, rms 2.55e-03, chisq 5.09e-03  |
 | `-DPS_REAL64` diagnostic     | VALID   | per 3.05e-05, rms 4.16e-03, chisq 8.33e-03  |
 
-Pole columns (dark/lambda/beta, ignored by the validator) were checked
-separately: 135/182 lines select the identical pole (la/be within 5 deg),
-8 lines land on the mirror pole (la+180, -be — the classic lightcurve-inversion
-ambiguity), and the remaining 39 are near-tie basin flips where the two devs
-differ only in the 3rd-4th decimal (FP32's pick fits *better* in 22 of them).
-The pure-double `-DPS_REAL64` build flips *more* lines (99) than FP32 (47),
-so the flips are optimizer degeneracy, not FP32 precision loss. The global
-best line matches: line 51, per 10.75313 vs 10.75309, pole 265/-36 vs 268/-35.
+Pole columns (dark/lambda/beta) are NOT validator-checked and do NOT all match
+the FP64 result — see `POLE_AUDIT.md` for the full analysis. Exact-print
+agreement is dark 102/181, lambda 77/182, beta 65/182; ~43 lines have lambda
+and ~40 have beta off by >5° (a different pole won that line). The audit shows
+this is objective-landscape bistability, not a df64 arithmetic defect (the
+pure-double HYBRID build flips basins vs the double oracle at the same rate),
+but it is a real open item: the per-pole `dev` gap (~0.4% median) has to close
+before columns 4-6 line up with FP64. The global best line does match: line 51,
+per 10.75313 vs 10.75309, pole 265/-36 vs 268/-35.

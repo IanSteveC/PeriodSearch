@@ -1,8 +1,26 @@
-# OpenCL FP32 (df64) port — STATUS: WORKING & VALIDATED
+# OpenCL FP32 (df64) port — STATUS: kernels run correctly; pole columns not yet matching
 
 The FP32 port of the OpenCL `period_search` app (branch `opencl-fp32`) now
-produces validator-clean results on the RX 6800 XT with no hardware FP64 used
-in the kernels. See `verification/README.md` for the validation matrix.
+runs the converted df64 kernels on the RX 6800 XT with no hardware FP64, and
+passes the project validator (period / rms / chisq). **But the pole columns
+(dark / lambda / beta), which the validator ignores, do NOT yet match the
+FP64 result on a large fraction of lines — this is the open item.** See
+`verification/README.md` for the validation matrix and `verification/POLE_AUDIT.md`
+for the per-pole analysis.
+
+## Bottom line (read this first)
+
+- period / rms / chisq: **match** the FP64 CPU baseline (182/182, 182/182,
+  181/182 within tolerance).
+- dark / lambda / beta: **do not all match.** Exact-print agreement is
+  dark 102/181, lambda 77/182, beta 65/182; ~43 lines have lambda and ~40
+  have beta off by >5°, i.e. a genuinely different pole won that line.
+- Root cause is understood and is *not* a df64 arithmetic bug (the pure-double
+  HYBRID build disagrees with the double oracle at the same rate — see
+  POLE_AUDIT.md). It is that the per-pole `dev` still differs from double by
+  ~0.4% median / up to ~2%, and in a field of near-degenerate optima that is
+  enough to reorder which starting pole wins each line. Closing that per-pole
+  `dev` gap is the remaining work.
 
 ## The mystery from the previous session — resolved
 
@@ -44,12 +62,31 @@ Fixes (this session):
 
 ## Validation (standard WU, 182 lines, vs FP64 CPU baseline)
 
-All three builds pass the *exact* upstream validator logic
-(`verification/ps_validate.cpp`): FP32 worst margins per=2.25e-05 (tol 0.1),
-rms=2.54e-03 (0.1), chisq=5.09e-03 (0.5). Pole columns were audited
-separately (see `verification/README.md`): identical or mirror poles on 143
-lines, near-tie basin flips elsewhere (equal fit quality; REAL64 flips more
-lines than FP32 does).
+**Columns 1–3 (period / rms / chisq).** All three builds pass the *exact*
+upstream validator logic (`verification/ps_validate.cpp`): FP32 worst margins
+per=2.25e-05 (tol 0.1), rms=2.54e-03 (0.1), chisq=5.09e-03 (0.5). Per-column:
+period 182/182 within 0.1%, rms 182/182 within 2%, chisq 181/182 within 2%.
+
+**Columns 4–6 (dark / lambda / beta).** These are NOT validator-checked and do
+not all match. Exact-print agreement: dark 102/181, lambda 77/182, beta 65/182;
+43 lines have lambda off by >5° and 40 have beta off by >5°. Full method and
+evidence in `verification/POLE_AUDIT.md`. Summary of what the per-pole audit
+(the `PS_DF_DEBUG` `[pole …]` dump) established:
+
+- It is landscape bistability, not df64 error: the pure-double **HYBRID** build
+  (float2 storage, double arithmetic) flips convergence basins vs REAL64 on
+  37% of pole trials — the *same* rate as FP32 — so the winner reordering is
+  driven by ULP-level storage rounding in a non-convex fit, not by the emulated
+  arithmetic. FP32 vs HYBRID agree 97%.
+- FP32 loses no optimum: on all 39 argmax-flipped output lines, the CPU
+  baseline's winning pole is present in FP32's own 10-pole table within 30°
+  (incl. the mirror pole), at dev within ~1% of CPU.
+- Same-basin endpoints agree to ~1° (|Δλ| median 1.1°, |Δβ| median 1.4° at
+  full convergence), with no directional bias.
+
+The practical consequence: to make columns 4–6 line up with FP64, the per-pole
+`dev` gap (median ~0.4%, up to ~2%) has to shrink so near-ties stop reordering.
+That is the top remaining task below.
 
 Known/pre-existing quirks (not regressions, tolerated by the pipeline):
 
@@ -69,7 +106,10 @@ cd period_search
 make                          # FP32 (df64) — the real target
 make CPPFLAGS=-DPS_REAL64     # diagnostic: same kernels, df=double, no pack
 make CPPFLAGS=-DPS_HYBRID     # diagnostic: float2 storage, double compute
-make CPPFLAGS=-DPS_DF_DEBUG   # FP32 + per-kernel/iteration readback dumps
+make CPPFLAGS=-DPS_DF_DEBUG   # FP32 + readback dumps: per-kernel/iteration
+                              # state AND the full per-(freq,pole) freq_result
+                              # table (grep '^\[pole' stderr.txt) used for the
+                              # pole audit
                               # (rm -f build/Release/Start_OpenCl.o first when
                               #  switching CPPFLAGS — make can't see the change)
 
@@ -77,8 +117,14 @@ cd ..
 rm -f kernels.bin period_search_state period_search_out boinc_lockfile kernelSource.cl boinc_finish_called stderr.txt
 cp /home/ian/builds/AST/period_search_out_win/period_search_in period_search_in
 ./period_search/build/Release/period_search_BOINC_linux_amd_opencl_110_x64_Release
-./verification/ps_validate period_search_out verification/ocl_fp64_baseline.out
+g++ -O2 -o /tmp/ps_validate verification/ps_validate.cpp   # first time only
+/tmp/ps_validate period_search_out verification/ocl_fp64_baseline.out
 ```
+
+To probe convergence rather than the WU's 50-iteration cap (useful when
+chasing the per-pole `dev` gap): set the WU input line-11 stop condition below
+1 (e.g. `1e-6`) and raise `MAX_N_ITER` in `constants.h`. The per-pole dump then
+shows fully-converged endpoints. Remember to revert both before committing.
 
 Gotchas: BOINC *appends* to `./stderr.txt` (shell redirects capture nothing —
 delete the file between runs); `kernels.bin` is a compiled-kernel cache and
@@ -88,6 +134,24 @@ use by the owner).
 
 ## Remaining work (next session)
 
+1. **Close the per-pole `dev` gap so dark/lambda/beta match FP64 (top
+   priority).** FP32's converged per-pole `dev` differs from the double oracle
+   by ~0.4% median / up to ~2%; in this near-degenerate optimum field that
+   reorders which starting pole wins each output line, which is exactly why
+   columns 4–6 disagree (see the Validation section and POLE_AUDIT.md). This is
+   a *precision* gap, not a logic bug. Leads to chase, in order:
+   - **Transcendental accuracy.** `df_acos` was only improved to ~2^-38 (vs
+     ~2^-46 for the other ops); the fit's residuals run acos/sincos/log/exp
+     every iteration. Tighten `df_acos` (and re-check `df_sincos`/`df_log`)
+     in `df64.cl` and remeasure the per-pole `dev` gap.
+   - **Accumulation order.** The normal-equations build (`mrqcof_*`, rank-8
+     tile updates) and the χ² reduction sum many terms; df64 is
+     order-sensitive. Compare FP32 vs HYBRID per-pole `dev` at *one* fixed
+     pole with the `[pole …]` dump — any gap there (they share storage) is
+     pure arithmetic/order and localizes the culprit kernel.
+   - Use `-DPS_DF_DEBUG` + the convergence WU tweak above; the target is to
+     drive the median per-pole `dev` gap toward the same-basin noise floor so
+     the winner selection matches FP64 on nearly every line.
 - **FP32/FP64 build toggle** like the CUDA/HIP apps: single codebase, default
   FP64, `FP32=1` opts in. All kernel arithmetic is already `df_*` calls, so
   this is: make `df64.cl`'s typedef+ops switch on a macro (df=double + trivial
