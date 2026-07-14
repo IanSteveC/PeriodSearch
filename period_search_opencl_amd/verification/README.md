@@ -28,8 +28,14 @@ df64):
 | build                        | verdict | worst margins (allowed 0.1 / 0.1 / 0.5)    | λ/β flips >5° |
 |------------------------------|---------|--------------------------------------------|---------------|
 | FP64 (default `make`)        | VALID   | per 2.33e-10, rms 0,       chisq 4.69e-08  | 0 / 0         |
-| FP32 (`make FP32=1`, df64)   | VALID   | per 1.34e-05, rms 1.57e-03, chisq 3.14e-03 | 11 / 9        |
+| FP32 (`make FP32=1`, df64)   | VALID   | per 2.54e-05, rms 8.42e-04, chisq 1.68e-03 | 11 / 10       |
 | `-DPS_HYBRID` diagnostic     | VALID   | per 2.52e-05, rms 8.47e-04, chisq 1.69e-03 | 10 / 11       |
+
+The FP32 margins now equal HYBRID's (float2 storage with *exact* double
+arithmetic) — after the df_acos rewrite and df_mul cross-term fix the emulated
+arithmetic contributes nothing measurable beyond the float2 storage rounding
+itself. Warm-run wall time on the RX 6800 XT, standard WU: FP64 13.5 s,
+FP32 df64 25.8 s.
 
 The FP64 build matches the reference pole columns **exactly** (182/182 on
 dark, lambda and beta; byte-identical to a pristine-kernel run). FP32 matches

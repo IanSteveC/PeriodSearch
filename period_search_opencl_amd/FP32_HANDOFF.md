@@ -14,19 +14,24 @@ hardware FP64. See `verification/README.md` for the matrix and
   validator margins per 2.3e-10 / rms 0 / chisq 4.7e-08. Byte-identical to
   the pristine pre-conversion kernels; hard-errors on FP64-less devices with
   a pointer to the FP32 build.
-- **FP32 (`make FP32=1`)**: VALID, worst margins per 1.34e-05 (tol 0.1),
-  rms 1.57e-03 (0.1), chisq 3.14e-03 (0.5). Poles: exact print 151/142/136
-  (dark/λ/β), winner flips >5° on 11/182 lines (down from 43 before the
-  constant fix). The global best line — the actual answer — matches exactly:
-  line 51, `10.75308538 (268,-35)`.
+- **FP32 (`make FP32=1`)**: VALID, worst margins per 2.54e-05 (tol 0.1),
+  rms 8.42e-04 (0.1), chisq 1.68e-03 (0.5) — margins now equal HYBRID's,
+  i.e. the emulated arithmetic is at the float2 storage bound. Poles: winner
+  flips >5° on 11 λ / 10 β of 182 lines (43/40 before the constant fix). The
+  global best line — the actual answer — matches exactly: line 51,
+  `10.75308538 (268,-35)`.
 - The residual FP32 flips are the ~49-bit float2 storage noise floor, NOT an
-  arithmetic bug: HYBRID (float2 storage, exact double compute) flips at the
-  same rate. Per-pole: 97.3% of the 2300 trials land in the same basin as the
-  double oracle; same-basin |Δdev|/dev median 1.3e-4. Closing them would need
-  ~72-bit float-only emulation (triple-float arithmetic AND storage,
-  transcendentals included) — a multi-week rewrite with a 2-4x slowdown that
-  defeats the purpose of the FP32 build; users who need exact columns should
-  run the FP64 build.
+  arithmetic bug, established by three controls: (1) HYBRID (float2 storage,
+  exact double compute) flips at the same rate; (2) REAL64 (53-bit) flips
+  zero; (3) tightening the weakest df64 ops (df_acos 2^-38→2^-45.5, df_mul
+  cross term) halved the rms/chisq margins but did NOT move the flip count.
+  Per-pole: 97.3% of the 2300 trials land in the same basin as the double
+  oracle; same-basin |Δdev|/dev median 1.3e-4. Exact pole parity on FP64-less
+  devices is NOT reachable inside 2-float storage — it requires wider
+  numerics (triple-float or soft-fp64), which was evaluated and declined for
+  performance (warm-run wall time, RX 6800 XT, standard WU: FP64 13.5 s,
+  FP32 df64 25.8 s already; triple-float would land roughly 2-3x above df64).
+  Users who need exact columns should run the FP64 build.
 
 ## The 2026-07-14 finding: `df_f()` constant truncation (read this first)
 
@@ -122,3 +127,14 @@ Done this session (2026-07-14, second pass): FP64/FP32 build toggle
 `make FP32=1` = df64; both verified byte-identical to their validated runs);
 `1e40f`→inf sentinels replaced with float-finite `1e30f` (output unchanged in
 both modes, confirming they were benign here).
+
+Third pass: df64 arithmetic pushed to the storage bound — df_acos rewritten
+via half-angle + Newton-on-sin (2^-38 → 2^-45.5 worst rel err; the old
+Newton-on-cos amplified sincos noise by 1/sin y near |x|~1), df_mul gained
+the a.y*b.y cross term (measure with tools/test_df64.cpp). Result: FP32
+validator margins now equal HYBRID's, flip count unchanged (the storage-floor
+prediction held). Compensated (Kahan) accumulation in the big reductions was
+analyzed and rejected: HYBRID shares the same summation patterns with exact
+per-op arithmetic and still flips 10-11, and the largest sum (ave) is
+common-mode and absorbed by the relative-curve renormalization — expected
+gain a partial flip reduction at real runtime cost, not parity.

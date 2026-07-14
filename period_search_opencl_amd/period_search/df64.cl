@@ -214,7 +214,7 @@ static inline df df_mul(df a, df b) {
     float p1, p2;
     p1 = two_prod(a.x, b.x, &p2);
     if (!isfinite(p1)) return DFV(p1, 0.0f);
-    p2 = fma(a.x, b.y, fma(a.y, b.x, p2));
+    p2 = fma(a.x, b.y, fma(a.y, b.x, fma(a.y, b.y, p2)));
     p1 = quick_two_sum(p1, p2, &p2);
     return DFV(p1, p2);
 }
@@ -359,37 +359,36 @@ static inline df df_log(df x) {
     return y;
 }
 
-/* ---- acos: general = float seed + 1 Newton; near |x|~1 (opposition zone,
-   x=ee.ee0 reaches 1-9e-8) use acos = 2*asin(sqrt((1-x)/2)); 1-x is exact by
-   cancellation in df so the tiny value survives ---- */
-static inline df df_asin_small(df t) {   /* |t| <= ~7e-3 */
-    df t2 = df_mul(t, t);
-    df p = DF_A9;
-    p = df_add(df_mul(p, t2), DF_A7);
-    p = df_add(df_mul(p, t2), DF_A5);
-    p = df_add(df_mul(p, t2), DF_A3);
-    return df_add(t, df_mul(t, df_mul(t2, p)));
+/* ---- asin core for |t| <= ~0.71: float seed + one Newton step on
+   sin(z)-t=0 (z += (t - sin z)/cos z). cos z >= 0.7 in this range, so the
+   sincos evaluation noise is never amplified; quadratic convergence takes
+   the 2^-24 seed straight to the ~2^-46 df noise floor. ---- */
+static inline df df_asin_core(df t) {
+    float z0 = asin(t.x);
+    df s, c; df_sincos(df_f(z0), &s, &c);
+    return df_add(df_f(z0), df_div(df_sub(t, s), c));
 }
+static inline df df_asin_small(df t) { return df_asin_core(t); }
+/* ---- acos via half-angle identities only. Newton directly on cos(y)-x=0
+   amplifies the sincos noise by 1/sin(y), which wrecks the |x|~1 boundary
+   (opposition zone, x=ee.ee0 reaches 1-9e-8); the half-angle forms keep the
+   asin argument <= ~0.71 where there is no amplification. 1-x / 1+x are
+   exact in df by cancellation, so the tiny opposition-zone values survive.
+   x >= 0.5:  acos(x) =        2*asin(sqrt((1-x)/2))   (t <= 0.5)
+   |x| < 0.5: acos(x) = pi/2 - asin(x)
+   x <= -0.5: acos(x) = pi -   2*asin(sqrt((1+x)/2))   (t <= 0.5)  ---- */
 static inline df df_acos(df x) {
     if (df_ge(x, DF_ONE))  return DF_ZERO;
     if (df_le(x, df_neg(DF_ONE))) return DF_PI;
-    if (x.x > 0.9999f) {
+    if (x.x >= 0.5f) {
         df t = df_sqrt(df_mul(df_sub(DF_ONE, x), DF_HALF));
-        return df_mul(df_f(2.0f), df_asin_small(t));
+        return df_mul(df_f(2.0f), df_asin_core(t));
     }
-    if (x.x < -0.9999f) {
+    if (x.x <= -0.5f) {
         df t = df_sqrt(df_mul(df_add(DF_ONE, x), DF_HALF));
-        return df_sub(DF_PI, df_mul(df_f(2.0f), df_asin_small(t)));
+        return df_sub(DF_PI, df_mul(df_f(2.0f), df_asin_core(t)));
     }
-    float y0 = acos(x.x);
-    df s, c; df_sincos(df_f(y0), &s, &c);
-    /* Newton on cos(y)-x=0: y += (cos y - x)/sin y. Two steps: y0 is only
-       ~2^-24 as an angle, so one step stalls near 2^-27; recompute sin/cos of
-       the improved df angle for the second step to reach ~2^-46. */
-    df y = df_add(df_f(y0), df_div(df_sub(c, x), s));
-    df_sincos(y, &s, &c);
-    y = df_add(y, df_div(df_sub(c, x), s));
-    return y;
+    return df_sub(DF_PIO2, df_asin_core(x));
 }
 
 /* ---- fmod(a,b) = a - b*trunc(a/b) ---- */
