@@ -6,6 +6,7 @@
 #define MAX_N_OBS         20000             /* max number of data points */
 #define MAX_LC              200             /* max number of lightcurves */
 #define MAX_LINE_LENGTH    1000             /* max length of line in an input file */
+#define MAX_N_FPOINTS    500000             /* max number of frequency points */
 #define MAX_N_FAC          1000             /* max number of facets */
 #define MAX_N_ITER          100             /* maximum number of iterations */
 #define MAX_N_PAR           200             /* maximum number of parameters */
@@ -845,128 +846,122 @@ void matrix_neo(
 
 		//	/* rotation matrix, Z axis, angle f */
 
-		tmat = cf * (*CUDA_LCC).Blmat[1][1] + sf * (*CUDA_LCC).Blmat[2][1] + 0 * (*CUDA_LCC).Blmat[3][1];
+		tmat = cf * (*CUDA_LCC).Blmat[1][1] + sf * (*CUDA_LCC).Blmat[2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = cf * (*CUDA_LCC).Blmat[1][2] + sf * (*CUDA_LCC).Blmat[2][2] + 0 * (*CUDA_LCC).Blmat[3][2];
+		tmat = cf * (*CUDA_LCC).Blmat[1][2] + sf * (*CUDA_LCC).Blmat[2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = cf * (*CUDA_LCC).Blmat[1][3] + sf * (*CUDA_LCC).Blmat[2][3] + 0 * (*CUDA_LCC).Blmat[3][3];
+		tmat = cf * (*CUDA_LCC).Blmat[1][3] + sf * (*CUDA_LCC).Blmat[2][3];
 		e_1G[jp] = pom + tmat * ee_3;
 		e0_1G[jp] = pom0 + tmat * ee0_3;
 
 		//if (blockIdx.x == 0)
 		//	printf("[%3d] jp[%3d] %10.7f, %10.7f\n", threadIdx.x, jp, e_1G[jp], e0_1G[jp]);
 
-		tmat = (-sf) * (*CUDA_LCC).Blmat[1][1] + cf * (*CUDA_LCC).Blmat[2][1] + 0 * (*CUDA_LCC).Blmat[3][1];
+		tmat = (-sf) * (*CUDA_LCC).Blmat[1][1] + cf * (*CUDA_LCC).Blmat[2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = (-sf) * (*CUDA_LCC).Blmat[1][2] + cf * (*CUDA_LCC).Blmat[2][2] + 0 * (*CUDA_LCC).Blmat[3][2];
+		tmat = (-sf) * (*CUDA_LCC).Blmat[1][2] + cf * (*CUDA_LCC).Blmat[2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = (-sf) * (*CUDA_LCC).Blmat[1][3] + cf * (*CUDA_LCC).Blmat[2][3] + 0 * (*CUDA_LCC).Blmat[3][3];
+		tmat = (-sf) * (*CUDA_LCC).Blmat[1][3] + cf * (*CUDA_LCC).Blmat[2][3];
 		e_2G[jp] = pom + tmat * ee_3;
 		e0_2G[jp] = pom0 + tmat * ee0_3;
 
-		tmat = 0 * (*CUDA_LCC).Blmat[1][1] + 0 * (*CUDA_LCC).Blmat[2][1] + 1 * (*CUDA_LCC).Blmat[3][1];
+		tmat = (*CUDA_LCC).Blmat[3][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = 0 * (*CUDA_LCC).Blmat[1][2] + 0 * (*CUDA_LCC).Blmat[2][2] + 1 * (*CUDA_LCC).Blmat[3][2];
+		tmat = (*CUDA_LCC).Blmat[3][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = 0 * (*CUDA_LCC).Blmat[1][3] + 0 * (*CUDA_LCC).Blmat[2][3] + 1 * (*CUDA_LCC).Blmat[3][3];
+		tmat = (*CUDA_LCC).Blmat[3][3];
 		e_3G[jp] = pom + tmat * ee_3;
 		e0_3G[jp] = pom0 + tmat * ee0_3;
 
-		tmat = cf * (*CUDA_LCC).Dblm[1][1][1] + sf * (*CUDA_LCC).Dblm[1][2][1] + 0 * (*CUDA_LCC).Dblm[1][3][1];
+		tmat = cf * (*CUDA_LCC).Dblm[1][1][1] + sf * (*CUDA_LCC).Dblm[1][2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = cf * (*CUDA_LCC).Dblm[1][1][2] + sf * (*CUDA_LCC).Dblm[1][2][2] + 0 * (*CUDA_LCC).Dblm[1][3][2];
+		tmat = cf * (*CUDA_LCC).Dblm[1][1][2] + sf * (*CUDA_LCC).Dblm[1][2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = cf * (*CUDA_LCC).Dblm[1][1][3] + sf * (*CUDA_LCC).Dblm[1][2][3] + 0 * (*CUDA_LCC).Dblm[1][3][3];
+		tmat = cf * (*CUDA_LCC).Dblm[1][1][3] + sf * (*CUDA_LCC).Dblm[1][2][3];
 		deG[(jp) * 16 + (1) * 4 + (1)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (1) * 4 + (1)] = pom0 + tmat * ee0_3;
 
-		tmat = cf * (*CUDA_LCC).Dblm[2][1][1] + sf * (*CUDA_LCC).Dblm[2][2][1] + 0 * (*CUDA_LCC).Dblm[2][3][1];
+		tmat = cf * (*CUDA_LCC).Dblm[2][1][1] + sf * (*CUDA_LCC).Dblm[2][2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = cf * (*CUDA_LCC).Dblm[2][1][2] + sf * (*CUDA_LCC).Dblm[2][2][2] + 0 * (*CUDA_LCC).Dblm[2][3][2];
+		tmat = cf * (*CUDA_LCC).Dblm[2][1][2] + sf * (*CUDA_LCC).Dblm[2][2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = cf * (*CUDA_LCC).Dblm[2][1][3] + sf * (*CUDA_LCC).Dblm[2][2][3] + 0 * (*CUDA_LCC).Dblm[2][3][3];
+		tmat = cf * (*CUDA_LCC).Dblm[2][1][3] + sf * (*CUDA_LCC).Dblm[2][2][3];
 		deG[(jp) * 16 + (1) * 4 + (2)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (1) * 4 + (2)] = pom0 + tmat * ee0_3;
 
-		tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][1] + (t * cf) * (*CUDA_LCC).Blmat[2][1] + 0 * (*CUDA_LCC).Blmat[3][1];
+		tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][1] + (t * cf) * (*CUDA_LCC).Blmat[2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][2] + (t * cf) * (*CUDA_LCC).Blmat[2][2] + 0 * (*CUDA_LCC).Blmat[3][2];
+		tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][2] + (t * cf) * (*CUDA_LCC).Blmat[2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][3] + (t * cf) * (*CUDA_LCC).Blmat[2][3] + 0 * (*CUDA_LCC).Blmat[3][3];
+		tmat = (-t * sf) * (*CUDA_LCC).Blmat[1][3] + (t * cf) * (*CUDA_LCC).Blmat[2][3];
 		deG[(jp) * 16 + (1) * 4 + (3)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (1) * 4 + (3)] = pom0 + tmat * ee0_3;
 
-		tmat = -sf * (*CUDA_LCC).Dblm[1][1][1] + cf * (*CUDA_LCC).Dblm[1][2][1] + 0 * (*CUDA_LCC).Dblm[1][3][1];
+		tmat = -sf * (*CUDA_LCC).Dblm[1][1][1] + cf * (*CUDA_LCC).Dblm[1][2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = -sf * (*CUDA_LCC).Dblm[1][1][2] + cf * (*CUDA_LCC).Dblm[1][2][2] + 0 * (*CUDA_LCC).Dblm[1][3][2];
+		tmat = -sf * (*CUDA_LCC).Dblm[1][1][2] + cf * (*CUDA_LCC).Dblm[1][2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = -sf * (*CUDA_LCC).Dblm[1][1][3] + cf * (*CUDA_LCC).Dblm[1][2][3] + 0 * (*CUDA_LCC).Dblm[1][3][3];
+		tmat = -sf * (*CUDA_LCC).Dblm[1][1][3] + cf * (*CUDA_LCC).Dblm[1][2][3];
 		deG[(jp) * 16 + (2) * 4 + (1)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (2) * 4 + (1)] = pom0 + tmat * ee0_3;
 
-		tmat = -sf * (*CUDA_LCC).Dblm[2][1][1] + cf * (*CUDA_LCC).Dblm[2][2][1] + 0 * (*CUDA_LCC).Dblm[2][3][1];
+		tmat = -sf * (*CUDA_LCC).Dblm[2][1][1] + cf * (*CUDA_LCC).Dblm[2][2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = -sf * (*CUDA_LCC).Dblm[2][1][2] + cf * (*CUDA_LCC).Dblm[2][2][2] + 0 * (*CUDA_LCC).Dblm[2][3][2];
+		tmat = -sf * (*CUDA_LCC).Dblm[2][1][2] + cf * (*CUDA_LCC).Dblm[2][2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = -sf * (*CUDA_LCC).Dblm[2][1][3] + cf * (*CUDA_LCC).Dblm[2][2][3] + 0 * (*CUDA_LCC).Dblm[2][3][3];
+		tmat = -sf * (*CUDA_LCC).Dblm[2][1][3] + cf * (*CUDA_LCC).Dblm[2][2][3];
 		deG[(jp) * 16 + (2) * 4 + (2)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (2) * 4 + (2)] = pom0 + tmat * ee0_3;
 
-		tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][1] + (-t * sf) * (*CUDA_LCC).Blmat[2][1] + 0 * (*CUDA_LCC).Blmat[3][1];
+		tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][1] + (-t * sf) * (*CUDA_LCC).Blmat[2][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][2] + (-t * sf) * (*CUDA_LCC).Blmat[2][2] + 0 * (*CUDA_LCC).Blmat[3][2];
+		tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][2] + (-t * sf) * (*CUDA_LCC).Blmat[2][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][3] + (-t * sf) * (*CUDA_LCC).Blmat[2][3] + 0 * (*CUDA_LCC).Blmat[3][3];
+		tmat = (-t * cf) * (*CUDA_LCC).Blmat[1][3] + (-t * sf) * (*CUDA_LCC).Blmat[2][3];
 		deG[(jp) * 16 + (2) * 4 + (3)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (2) * 4 + (3)] = pom0 + tmat * ee0_3;
 
-		tmat = 0 * (*CUDA_LCC).Dblm[1][1][1] + 0 * (*CUDA_LCC).Dblm[1][2][1] + 1 * (*CUDA_LCC).Dblm[1][3][1];
+		tmat = (*CUDA_LCC).Dblm[1][3][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = 0 * (*CUDA_LCC).Dblm[1][1][2] + 0 * (*CUDA_LCC).Dblm[1][2][2] + 1 * (*CUDA_LCC).Dblm[1][3][2];
+		tmat = (*CUDA_LCC).Dblm[1][3][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = 0 * (*CUDA_LCC).Dblm[1][1][3] + 0 * (*CUDA_LCC).Dblm[1][2][3] + 1 * (*CUDA_LCC).Dblm[1][3][3];
+		tmat = (*CUDA_LCC).Dblm[1][3][3];
 		deG[(jp) * 16 + (3) * 4 + (1)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (3) * 4 + (1)] = pom0 + tmat * ee0_3;
 
-		tmat = 0 * (*CUDA_LCC).Dblm[2][1][1] + 0 * (*CUDA_LCC).Dblm[2][2][1] + 1 * (*CUDA_LCC).Dblm[2][3][1];
+		tmat = (*CUDA_LCC).Dblm[2][3][1];
 		pom = tmat * ee_1;
 		pom0 = tmat * ee0_1;
-		tmat = 0 * (*CUDA_LCC).Dblm[2][1][2] + 0 * (*CUDA_LCC).Dblm[2][2][2] + 1 * (*CUDA_LCC).Dblm[2][3][2];
+		tmat = (*CUDA_LCC).Dblm[2][3][2];
 		pom += tmat * ee_2;
 		pom0 += tmat * ee0_2;
-		tmat = 0 * (*CUDA_LCC).Dblm[2][1][3] + 0 * (*CUDA_LCC).Dblm[2][2][3] + 1 * (*CUDA_LCC).Dblm[2][3][3];
+		tmat = (*CUDA_LCC).Dblm[2][3][3];
 		deG[(jp) * 16 + (3) * 4 + (2)] = pom + tmat * ee_3;
 		de0G[(jp) * 16 + (3) * 4 + (2)] = pom0 + tmat * ee0_3;
 
-		tmat = 0 * (*CUDA_LCC).Blmat[1][1] + 0 * (*CUDA_LCC).Blmat[2][1] + 0 * (*CUDA_LCC).Blmat[3][1];
-		pom = tmat * ee_1;
-		pom0 = tmat * ee0_1;
-		tmat = 0 * (*CUDA_LCC).Blmat[1][2] + 0 * (*CUDA_LCC).Blmat[2][2] + 0 * (*CUDA_LCC).Blmat[3][2];
-		pom += tmat * ee_2;
-		pom0 += tmat * ee0_2;
-		tmat = 0 * (*CUDA_LCC).Blmat[1][3] + 0 * (*CUDA_LCC).Blmat[2][3] + 0 * (*CUDA_LCC).Blmat[3][3];
-		deG[(jp) * 16 + (3) * 4 + (3)] = pom + tmat * ee_3;
-		de0G[(jp) * 16 + (3) * 4 + (3)] = pom0 + tmat * ee0_3;
+
+		deG[(jp) * 16 + (3) * 4 + (3)] = 0;
+		de0G[(jp) * 16 + (3) * 4 + (3)] = 0;
 	}
 
 	barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE);  //__syncthreads();
@@ -1135,7 +1130,8 @@ void bright(
 			double l_dbr = dbr[0];
 			int l_incl = incl[0];
 			tmp = l_dbr * (*CUDA_CC).Dsph[l_incl][i];
-			if ((i + 1) <= ncoef0)
+			int is_next_coef_valid = (i + 1) <= ncoef0;
+			if (is_next_coef_valid)
 			{
 				tmp1 = l_dbr * (*CUDA_CC).Dsph[l_incl][i + 1];
 			}
@@ -1145,14 +1141,14 @@ void bright(
 				double l_dbr = dbr[j];
 				int l_incl = incl[j];
 				tmp += l_dbr * (*CUDA_CC).Dsph[l_incl][i];
-				if ((i + 1) <= ncoef0)
+				if (is_next_coef_valid)
 				{
 					tmp1 += l_dbr * (*CUDA_CC).Dsph[l_incl][i + 1];
 				}
 			}
 
 			dytempG[d] = Scale * tmp;
-			if ((i + 1) <= ncoef0)
+			if (is_next_coef_valid)
 			{
 				dytempG[d1] = Scale * tmp1;
 			}
